@@ -10,21 +10,12 @@ const EVENT_FORMAT: &str = " \
 		{ \"name\" : \"EVENT_SIZE\", \"type\" : \"SIZE_T\" } \
 	] \
 ";
-
-struct AcqControl {
-    dev_handle: u64,
-    ep_configured: bool,
-    acq_started: bool,
-    num_ch: usize,
-}
-
-struct Event {
-    timestamp: u64,
-    trigger_id: u32,
-    waveforms: Vec<Vec<u16>>,
-    waveform_size: Vec<usize>,
-    event_size: usize,
-}
+const TEST_FORMAT: &str = " \
+	[ \
+		{ \"name\" : \"TIMESTAMP\", \"type\" : \"U64\" }, \
+		{ \"name\" : \"TRIGGER_ID\", \"type\" : \"U32\" }, \
+	] \
+";
 
 fn main() -> Result<(), FELibError> {
     // connect to digitizer
@@ -45,7 +36,7 @@ fn main() -> Result<(), FELibError> {
     println!("cup ver: {cupver}");
 
     // get num channels
-    let num_chan: usize = numch.parse().unwrap();
+    let num_chan = numch.parse::<usize>().map_err(|_| FELibError::Unknown)?;
 
     // reset
     felib_sendcommand(dev_handle, "/cmd/reset")?;
@@ -65,13 +56,23 @@ fn main() -> Result<(), FELibError> {
     felib_gethandle(dev_handle, "/endpoint/scope", &mut ep_handle)?;
     felib_getparenthandle(ep_handle, "", &mut ep_folder_handle)?;
     felib_setvalue(ep_folder_handle, "/par/activeendpoint", "scope")?;
-    felib_setreaddataformat(ep_handle, EVENT_FORMAT)?;
+    felib_setreaddataformat(ep_handle, TEST_FORMAT)?;
 
-    // for _ in 0..100 {
-    //     felib_readdata(dev_handle, &mut data)?;
-    //     println!("timestamp: {}", data.timestamp);
-    //     thread::sleep(Duration::from_secs(5));
-    // }
+    let mut event = Event {
+        timestamp: 0,
+        trigger_id: 0,
+        waveforms: vec![vec![0u16; 10]; 10],
+        waveform_size: vec![0usize; 10],
+        event_size: 0,
+    };
+
+    for _ in 0..10 {
+        felib_readdata(dev_handle, &mut event)?;
+        println!("timestamp: {}", event.timestamp);
+        thread::sleep(Duration::from_secs(5));
+    }
+
+    felib_close(dev_handle)?;
 
     Ok(())
 }
