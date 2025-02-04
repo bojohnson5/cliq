@@ -54,7 +54,7 @@ impl From<i32> for FELibError {
 
 #[repr(i32)]
 #[derive(Clone, Copy, PartialEq, PartialOrd, Debug)]
-enum FELibNode {
+pub enum FELibNode {
     Unknown = -1,
     Parameter = 0,
     Command = 1,
@@ -98,85 +98,65 @@ impl From<i32> for FELibNode {
     }
 }
 
-fn connect_to_digitizer(dev_handle: &mut u64, path: &str) -> Result<(), FELibError> {
-    let path = CString::new(path).expect("bad dev path");
-    let res = unsafe { CAEN_FELib_Open(path.as_ptr(), dev_handle as *mut u64) };
+pub fn felib_getlibinfo() -> Result<String, FELibError> {
+    let buffer_size = 1024;
+    let mut buffer = vec![0u8; buffer_size];
+    let res = unsafe { CAEN_FELib_GetLibInfo(buffer.as_mut_ptr() as *mut i8, buffer_size) };
     let res = FELibError::from(res);
     match res {
-        FELibError::Success => Ok(()),
+        FELibError::Success => Ok(String::from_utf8(buffer).unwrap()),
         _ => Err(res),
     }
 }
 
-fn get_n_channels(dev_handle: u64) -> Result<usize, FELibError> {
-    let value = CString::new("/par/NumCh").expect("bad value");
-    let chans = 0;
-    let res = unsafe { CAEN_FELib_GetValue(dev_handle, value.as_ptr(), chans as *mut i8) };
+pub fn felib_getlibversion() -> Result<String, FELibError> {
+    let mut libv = vec![0u8; 16];
+    let res = unsafe { CAEN_FELib_GetLibVersion(libv.as_mut_ptr() as *mut i8) };
     let res = FELibError::from(res);
     match res {
-        FELibError::Success => Ok(chans),
+        FELibError::Success => Ok(String::from_utf8(libv).unwrap()),
         _ => Err(res),
     }
 }
 
-fn felib_getlibinfo() -> Result<String, FELibError> {
-    let json_string = String::new();
-    let size = 0;
-    let res = unsafe { CAEN_FELib_GetLibInfo(json_string.as_ptr() as *mut i8, size) };
+pub fn felib_geterrorname(error: CAEN_FELib_ErrorCode) -> Result<String, FELibError> {
+    let mut err_name = vec![0u8; 32];
+    let res = unsafe { CAEN_FELib_GetErrorName(error, err_name.as_mut_ptr() as *mut i8) };
     let res = FELibError::from(res);
     match res {
-        FELibError::Success => Ok(json_string),
+        FELibError::Success => Ok(String::from_utf8(err_name).unwrap()),
         _ => Err(res),
     }
 }
 
-fn felib_getlibversion() -> Result<String, FELibError> {
-    let libv = String::new();
-    let res = unsafe { CAEN_FELib_GetLibVersion(libv.as_ptr() as *mut i8) };
+pub fn felib_geterrordesc(error: CAEN_FELib_ErrorCode) -> Result<String, FELibError> {
+    let mut err_desc = vec![0u8; 256];
+    let res = unsafe { CAEN_FELib_GetErrorName(error, err_desc.as_mut_ptr() as *mut i8) };
     let res = FELibError::from(res);
     match res {
-        FELibError::Success => Ok(libv),
+        FELibError::Success => Ok(String::from_utf8(err_desc).unwrap()),
         _ => Err(res),
     }
 }
 
-fn felib_geterrorname(error: CAEN_FELib_ErrorCode) -> Result<String, FELibError> {
-    let err_name = String::new();
-    let res = unsafe { CAEN_FELib_GetErrorName(error, err_name.as_ptr() as *mut i8) };
+pub fn felib_getlasterror() -> Result<String, FELibError> {
+    let mut last_err = vec![0u8; 1024];
+    let res = unsafe { CAEN_FELib_GetLibVersion(last_err.as_mut_ptr() as *mut i8) };
     let res = FELibError::from(res);
     match res {
-        FELibError::Success => Ok(err_name),
+        FELibError::Success => Ok(String::from_utf8(last_err).unwrap()),
         _ => Err(res),
     }
 }
 
-fn felib_geterrordesc(error: CAEN_FELib_ErrorCode) -> Result<String, FELibError> {
-    let err_desc = String::new();
-    let res = unsafe { CAEN_FELib_GetErrorName(error, err_desc.as_ptr() as *mut i8) };
+pub fn felib_devicesdiscovery() -> Result<String, FELibError> {
+    let buffer_size = 1024;
+    let mut devices = vec![0u8; buffer_size];
+    let res =
+        unsafe { CAEN_FELib_DevicesDiscovery(devices.as_mut_ptr() as *mut i8, buffer_size, 5) };
     let res = FELibError::from(res);
     match res {
-        FELibError::Success => Ok(err_desc),
-        _ => Err(res),
-    }
-}
-
-fn felib_getlasterror() -> Result<String, FELibError> {
-    let last_err = String::new();
-    let res = unsafe { CAEN_FELib_GetLibVersion(last_err.as_ptr() as *mut i8) };
-    let res = FELibError::from(res);
-    match res {
-        FELibError::Success => Ok(last_err),
-        _ => Err(res),
-    }
-}
-
-fn felib_devicesdiscovery() -> Result<String, FELibError> {
-    let devices = String::new();
-    let size = 0;
-    let res = unsafe { CAEN_FELib_GetLibInfo(devices.as_ptr() as *mut i8, size) };
-    let res = FELibError::from(res);
-    match res {
-        FELibError::Success => Ok(devices),
+        FELibError::Success => Ok(String::from_utf8(devices).unwrap()),
         _ => Err(res),
     }
 }
@@ -192,7 +172,7 @@ pub fn felib_open(url: &str) -> Result<u64, FELibError> {
     }
 }
 
-fn felib_close(handle: u64) -> Result<(), FELibError> {
+pub fn felib_close(handle: u64) -> Result<(), FELibError> {
     let res = unsafe { CAEN_FELib_Close(handle) };
     let res = FELibError::from(res);
     match res {
@@ -201,59 +181,43 @@ fn felib_close(handle: u64) -> Result<(), FELibError> {
     }
 }
 
-fn felib_getimpllibversion(handle: u64) -> Result<String, FELibError> {
-    let libv = String::with_capacity(16);
-    let res = unsafe { CAEN_FELib_GetImplLibVersion(handle, libv.as_ptr() as *mut i8) };
+pub fn felib_getimpllibversion(handle: u64) -> Result<String, FELibError> {
+    let mut libv = vec![0u8; 16];
+    let res = unsafe { CAEN_FELib_GetImplLibVersion(handle, libv.as_mut_ptr() as *mut i8) };
     let res = FELibError::from(res);
     match res {
-        FELibError::Success => Ok(libv),
+        FELibError::Success => Ok(String::from_utf8(libv).unwrap()),
         _ => Err(res),
     }
 }
 
-fn felib_getdevicetree(handle: u64, size: usize) -> Result<String, FELibError> {
-    let dev_tree = String::with_capacity(size);
-    let res = unsafe { CAEN_FELib_GetDeviceTree(handle, dev_tree.as_ptr() as *mut i8, size) };
+pub fn felib_getdevicetree(handle: u64) -> Result<String, FELibError> {
+    let buffer_size = 1024;
+    let mut dev_tree = vec![0u8; buffer_size];
+    let res =
+        unsafe { CAEN_FELib_GetDeviceTree(handle, dev_tree.as_mut_ptr() as *mut i8, buffer_size) };
     let res = FELibError::from(res);
     match res {
-        FELibError::Success => Ok(dev_tree),
+        FELibError::Success => Ok(String::from_utf8(dev_tree).unwrap()),
         _ => Err(res),
     }
 }
 
-fn felib_getvalue(handle: u64, path: String) -> Result<String, FELibError> {
-    let value = String::with_capacity(256);
-    let res = unsafe {
-        CAEN_FELib_GetValue(
-            handle,
-            path.as_ptr() as *const i8,
-            value.as_ptr() as *mut i8,
-        )
-    };
+pub fn felib_getvalue(handle: u64, path: &str) -> Result<String, FELibError> {
+    let mut value = vec![0u8; 256];
+    let path = CString::new(path).unwrap();
+    let res = unsafe { CAEN_FELib_GetValue(handle, path.as_ptr(), value.as_mut_ptr() as *mut i8) };
     let res = FELibError::from(res);
     match res {
-        FELibError::Success => Ok(value),
+        FELibError::Success => Ok(String::from_utf8(value).unwrap()),
         _ => Err(res),
     }
 }
 
-fn felib_setvalue(handle: u64, path: String, value: String) -> Result<String, FELibError> {
-    let res = unsafe {
-        CAEN_FELib_SetValue(
-            handle,
-            path.as_ptr() as *const i8,
-            value.as_ptr() as *mut i8,
-        )
-    };
-    let res = FELibError::from(res);
-    match res {
-        FELibError::Success => Ok(value),
-        _ => Err(res),
-    }
-}
-
-fn felib_sendcommand(handle: u64, path: String) -> Result<(), FELibError> {
-    let res = unsafe { CAEN_FELib_SendCommand(handle, path.as_ptr() as *mut i8) };
+pub fn felib_setvalue(handle: u64, path: &str, value: &str) -> Result<(), FELibError> {
+    let path = CString::new(path).unwrap();
+    let value = CString::new(value).unwrap();
+    let res = unsafe { CAEN_FELib_SetValue(handle, path.as_ptr(), value.as_ptr()) };
     let res = FELibError::from(res);
     match res {
         FELibError::Success => Ok(()),
@@ -261,8 +225,9 @@ fn felib_sendcommand(handle: u64, path: String) -> Result<(), FELibError> {
     }
 }
 
-fn felib_setreaddataformat(handle: u64, format: String) -> Result<(), FELibError> {
-    let res = unsafe { CAEN_FELib_SetReadDataFormat(handle, format.as_ptr() as *const i8) };
+pub fn felib_sendcommand(handle: u64, path: &str) -> Result<(), FELibError> {
+    let path = CString::new(path).unwrap();
+    let res = unsafe { CAEN_FELib_SendCommand(handle, path.as_ptr()) };
     let res = FELibError::from(res);
     match res {
         FELibError::Success => Ok(()),
@@ -270,8 +235,9 @@ fn felib_setreaddataformat(handle: u64, format: String) -> Result<(), FELibError
     }
 }
 
-fn felib_hasdata(handle: u64, timeout: i32) -> Result<(), FELibError> {
-    let res = unsafe { CAEN_FELib_HasData(handle, timeout) };
+pub fn felib_setreaddataformat(handle: u64, format: &str) -> Result<(), FELibError> {
+    let format = CString::new(format).unwrap();
+    let res = unsafe { CAEN_FELib_SetReadDataFormat(handle, format.as_ptr()) };
     let res = FELibError::from(res);
     match res {
         FELibError::Success => Ok(()),
@@ -279,25 +245,11 @@ fn felib_hasdata(handle: u64, timeout: i32) -> Result<(), FELibError> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::os;
-
-    #[test]
-    fn test_code() {
-        let mut handle: u64 = 10;
-        let path = "Path";
-        let path = CString::new(path).expect("uh oh");
-        let res = unsafe {
-            CAEN_FELib_Open(
-                path.as_ptr() as *const os::raw::c_char,
-                &mut handle as *mut u64,
-            )
-        };
-        if res != CAEN_FELib_ErrorCode_CAEN_FELib_Success {
-            println!("error!");
-        }
-        println!("{res}");
+pub fn felib_hasdata(handle: u64) -> Result<(), FELibError> {
+    let res = unsafe { CAEN_FELib_HasData(handle, 5) };
+    let res = FELibError::from(res);
+    match res {
+        FELibError::Success => Ok(()),
+        _ => Err(res),
     }
 }
