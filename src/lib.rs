@@ -55,6 +55,27 @@ impl From<i32> for FELibError {
 pub struct Data {
     pub format: String,
     pub timestamp: u64,
+    pub trigger_id: u32,
+    pub waveform: Vec<Vec<u16>>,
+    pub waveform_size: Vec<usize>,
+    pub event_size: usize,
+}
+
+impl Data {
+    pub fn new(format: String, num_ch: usize, wf_len: usize) -> Self {
+        let mut waveforms = Vec::with_capacity(num_ch);
+        for _ in 0..num_ch {
+            waveforms.push(vec![0u16; wf_len]);
+        }
+        Self {
+            format,
+            timestamp: 0,
+            trigger_id: 0,
+            waveform: waveforms,
+            waveform_size: vec![0usize; num_ch],
+            event_size: 0,
+        }
+    }
 }
 
 pub fn felib_getlibinfo() -> Result<String, FELibError> {

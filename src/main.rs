@@ -2,11 +2,14 @@ use std::{thread, time::Duration};
 
 use rust_daq::*;
 
+const NUM_CH: usize = 1;
+const WF_LEN: usize = 1024;
+
 fn main() -> Result<(), FELibError> {
     let dev_handle = felib_open("dig2://caendgtz-usb-25380")?;
 
-    let mut data = Data {
-        format: String::from(
+    let mut data = Data::new(
+        String::from(
             " \
 	[ \
 		{ \"name\" : \"TIMESTAMP\", \"type\" : \"U64\" }, \
@@ -17,8 +20,9 @@ fn main() -> Result<(), FELibError> {
 	] \
 ",
         ),
-        timestamp: 0,
-    };
+        NUM_CH,
+        WF_LEN,
+    );
 
     felib_setreaddataformat(dev_handle, &data.format)?;
 
