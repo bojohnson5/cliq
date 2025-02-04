@@ -52,50 +52,9 @@ impl From<i32> for FELibError {
     }
 }
 
-#[repr(i32)]
-#[derive(Clone, Copy, PartialEq, PartialOrd, Debug)]
-pub enum FELibNode {
-    Unknown = -1,
-    Parameter = 0,
-    Command = 1,
-    Feature = 2,
-    Attribute = 3,
-    Endpoint = 4,
-    Channel = 5,
-    Digitizer = 6,
-    Folder = 7,
-    LVDS = 8,
-    VGA = 9,
-    HVChannel = 10,
-    MonOut = 11,
-    VTrace = 12,
-    Group = 13,
-    HVRange = 14,
-    Other,
-}
-
-impl From<i32> for FELibNode {
-    fn from(value: i32) -> Self {
-        match value {
-            -1 => Self::Unknown,
-            0 => Self::Parameter,
-            1 => Self::Command,
-            2 => Self::Feature,
-            3 => Self::Attribute,
-            4 => Self::Endpoint,
-            5 => Self::Channel,
-            6 => Self::Digitizer,
-            7 => Self::Folder,
-            8 => Self::LVDS,
-            9 => Self::VGA,
-            10 => Self::HVChannel,
-            11 => Self::MonOut,
-            12 => Self::VTrace,
-            13 => Self::Group,
-            14 => Self::HVRange,
-            _ => Self::Other,
-        }
-    }
+pub struct Data {
+    pub format: String,
+    pub timestamp: u64,
 }
 
 pub fn felib_getlibinfo() -> Result<String, FELibError> {
@@ -238,6 +197,15 @@ pub fn felib_sendcommand(handle: u64, path: &str) -> Result<(), FELibError> {
 pub fn felib_setreaddataformat(handle: u64, format: &str) -> Result<(), FELibError> {
     let format = CString::new(format).unwrap();
     let res = unsafe { CAEN_FELib_SetReadDataFormat(handle, format.as_ptr()) };
+    let res = FELibError::from(res);
+    match res {
+        FELibError::Success => Ok(()),
+        _ => Err(res),
+    }
+}
+
+pub fn felib_readdata(handle: u64, data: &mut Data) -> Result<(), FELibError> {
+    let res = unsafe { CAEN_FELib_ReadData(handle, 5, data.timestamp) };
     let res = FELibError::from(res);
     match res {
         FELibError::Success => Ok(()),
