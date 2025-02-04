@@ -182,9 +182,9 @@ fn felib_devicesdiscovery() -> Result<String, FELibError> {
 }
 
 fn felib_open(url: String) -> Result<u64, FELibError> {
-    let handle = 0;
+    let mut handle = 0;
     let url = CString::new(url).unwrap();
-    let res = unsafe { CAEN_FELib_Open(url.as_ptr(), handle as *mut u64) };
+    let res = unsafe { CAEN_FELib_Open(url.as_ptr(), &mut handle) };
     let res = FELibError::from(res);
     match res {
         FELibError::Success => Ok(handle),
