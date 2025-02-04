@@ -8,7 +8,7 @@ use std::ffi::CString;
 
 #[repr(i32)]
 #[derive(Clone, Copy, PartialEq, PartialOrd, Debug)]
-enum FELibError {
+pub enum FELibError {
     Success = 0,
     Generic = -1,
     InvalidParam = -2,
@@ -181,7 +181,7 @@ fn felib_devicesdiscovery() -> Result<String, FELibError> {
     }
 }
 
-fn felib_open(url: &str) -> Result<u64, FELibError> {
+pub fn felib_open(url: &str) -> Result<u64, FELibError> {
     let mut handle = 0;
     let url = CString::new(url).unwrap();
     let res = unsafe { CAEN_FELib_Open(url.as_ptr(), &mut handle) };
