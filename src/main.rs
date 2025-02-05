@@ -1,5 +1,10 @@
 use rust_daq::*;
-use std::{thread, time::Duration};
+use std::{
+    io,
+    sync::{Arc, Condvar, Mutex},
+    thread,
+    time::Duration,
+};
 
 const EVENT_FORMAT: &str = " \
 	[ \
@@ -43,36 +48,92 @@ fn main() -> Result<(), FELibError> {
 
     // send acq_control to a new thread where it will configure endpoints and get ready
     // to read events
-    let mut acq_control = AcqControl {
+    let acq_control = AcqControl {
         dev_handle,
         ep_configured: false,
         acq_started: false,
         num_ch: num_chan,
     };
+    let acq_control = Arc::new((Mutex::new(acq_control), Condvar::new()));
+    let shared_acq_control = Arc::clone(&acq_control);
 
+    let handle = thread::spawn(|| data_taking(shared_acq_control));
+
+    // configure digitizer before running
+    felib_setvalue(dev_handle, "/ch/0/par/ChEnable", "true")?;
+    felib_setvalue(dev_handle, "/par/RecordLengthS", "1024")?;
+    felib_setvalue(dev_handle, "/par/PreTriggerS", "100")?;
+    felib_setvalue(dev_handle, "/par/AcqTriggerSource", "SwTrg | TestPulse")?;
+    felib_setvalue(dev_handle, "/par/TestPulsePeriod", "100000000.0")?;
+    felib_setvalue(dev_handle, "/par/TestPulseWidth", "1000")?;
+    felib_setvalue(dev_handle, "/ch/0/par/DCOffset", "50.0")?;
+
+    // wait for endpoint configuration before data taking
+    let (control, cond) = &*acq_control;
+    let mut started = control.lock().unwrap();
+    while !started.ep_configured {
+        started = cond.wait(started).unwrap();
+    }
+
+    // begin acquisition
+    felib_sendcommand(dev_handle, "/cmd/armacquisition")?;
+    felib_sendcommand(dev_handle, "/cmd/swstartacquisition")?;
+
+    let (control, cond) = &*acq_control;
+    control.lock().unwrap().acq_started = true;
+    cond.notify_one();
+
+    // watch for commands from user
+    println!("##############################");
+    println!("Commands supported:");
+    println!("\t[t]\tsend manual trigger");
+    println!("\t[s]\tstop acquisition");
+    println!("##############################");
+
+    let mut quit = false;
+    while !quit {
+        let mut input = String::new();
+        io::stdin()
+            .read_line(&mut input)
+            .expect("error getting input");
+        match input.trim() {
+            "t" => felib_sendcommand(dev_handle, "/cmd/sendswtrigger")?,
+            "s" => quit = true,
+            _ => (),
+        }
+    }
+
+    felib_sendcommand(dev_handle, "/cmd/disarmacquisition")?;
+
+    let _ = handle.join();
+
+    felib_close(dev_handle)?;
+
+    println!("TTFN!");
+
+    Ok(())
+}
+
+fn data_taking(acq_control: Arc<(Mutex<AcqControl>, Condvar)>) -> Result<(), FELibError> {
+    let (control, cond) = &*acq_control;
     // configure endpoint
     let mut ep_handle = 0;
     let mut ep_folder_handle = 0;
-    felib_gethandle(dev_handle, "/endpoint/scope", &mut ep_handle)?;
+    felib_gethandle(
+        control.lock().unwrap().dev_handle,
+        "/endpoint/scope",
+        &mut ep_handle,
+    )?;
     felib_getparenthandle(ep_handle, "", &mut ep_folder_handle)?;
     felib_setvalue(ep_folder_handle, "/par/activeendpoint", "scope")?;
     felib_setreaddataformat(ep_handle, TEST_FORMAT)?;
+    control.lock().unwrap().ep_configured = true;
+    cond.notify_one();
 
-    let mut event = Event {
-        timestamp: 0,
-        trigger_id: 0,
-        waveforms: vec![vec![0u16; 10]; 10],
-        waveform_size: vec![0usize; 10],
-        event_size: 0,
-    };
-
-    for _ in 0..10 {
-        felib_readdata(dev_handle, &mut event)?;
-        println!("timestamp: {}", event.timestamp);
-        thread::sleep(Duration::from_secs(5));
+    let mut started = control.lock().unwrap();
+    while !started.acq_started {
+        started = cond.wait(started).unwrap();
     }
-
-    felib_close(dev_handle)?;
 
     Ok(())
 }
