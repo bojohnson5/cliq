@@ -3,7 +3,6 @@ use std::{
     io,
     sync::{Arc, Condvar, Mutex},
     thread,
-    time::Duration,
 };
 
 const EVENT_FORMAT: &str = " \
@@ -70,17 +69,23 @@ fn main() -> Result<(), FELibError> {
 
     // wait for endpoint configuration before data taking
     let (control, cond) = &*acq_control;
-    let mut started = control.lock().unwrap();
-    while !started.ep_configured {
-        started = cond.wait(started).unwrap();
+    {
+        let started = control.lock().unwrap();
+        drop(
+            cond.wait_while(started, |state| !state.ep_configured)
+                .unwrap(),
+        );
     }
-
     // begin acquisition
     felib_sendcommand(dev_handle, "/cmd/armacquisition")?;
     felib_sendcommand(dev_handle, "/cmd/swstartacquisition")?;
 
-    started.acq_started = true;
-    cond.notify_one();
+    {
+        let (control, cond) = &*acq_control;
+        let mut started = control.lock().unwrap();
+        started.acq_started = true;
+        cond.notify_one();
+    }
 
     // watch for commands from user
     println!("##############################");
@@ -102,7 +107,6 @@ fn main() -> Result<(), FELibError> {
         }
     }
 
-    println!("ending acquisition");
     felib_sendcommand(dev_handle, "/cmd/disarmacquisition")?;
 
     let _ = handle.join().unwrap();
@@ -128,14 +132,19 @@ fn data_taking(acq_control: Arc<(Mutex<AcqControl>, Condvar)>) -> Result<(), FEL
     felib_setvalue(ep_folder_handle, "/par/activeendpoint", "scope")?;
     felib_setreaddataformat(ep_handle, TEST_FORMAT)?;
 
-    let mut started = control.lock().unwrap();
-    started.ep_configured = true;
-    cond.notify_one();
-
-    while !started.acq_started {
-        started = cond.wait(started).unwrap();
+    {
+        let mut started = control.lock().unwrap();
+        started.ep_configured = true;
+        cond.notify_one();
     }
 
-    println!("ending data taking thread");
+    {
+        let started = control.lock().unwrap();
+        drop(
+            cond.wait_while(started, |state| !state.acq_started)
+                .unwrap(),
+        );
+    }
+
     Ok(())
 }
