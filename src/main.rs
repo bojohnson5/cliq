@@ -18,7 +18,7 @@ const EVENT_FORMAT: &str = " \
 const TEST_FORMAT: &str = " \
 	[ \
 		{ \"name\" : \"TIMESTAMP\", \"type\" : \"U64\" }, \
-		{ \"name\" : \"TRIGGER_ID\", \"type\" : \"U32\" }, \
+		{ \"name\" : \"TRIGGER_ID\", \"type\" : \"U32\" } \
 	] \
 ";
 
@@ -79,8 +79,7 @@ fn main() -> Result<(), FELibError> {
     felib_sendcommand(dev_handle, "/cmd/armacquisition")?;
     felib_sendcommand(dev_handle, "/cmd/swstartacquisition")?;
 
-    let (control, cond) = &*acq_control;
-    control.lock().unwrap().acq_started = true;
+    started.acq_started = true;
     cond.notify_one();
 
     // watch for commands from user
@@ -103,9 +102,10 @@ fn main() -> Result<(), FELibError> {
         }
     }
 
+    println!("ending acquisition");
     felib_sendcommand(dev_handle, "/cmd/disarmacquisition")?;
 
-    let _ = handle.join();
+    let _ = handle.join().unwrap();
 
     felib_close(dev_handle)?;
 
@@ -127,13 +127,15 @@ fn data_taking(acq_control: Arc<(Mutex<AcqControl>, Condvar)>) -> Result<(), FEL
     felib_getparenthandle(ep_handle, "", &mut ep_folder_handle)?;
     felib_setvalue(ep_folder_handle, "/par/activeendpoint", "scope")?;
     felib_setreaddataformat(ep_handle, TEST_FORMAT)?;
-    control.lock().unwrap().ep_configured = true;
-    cond.notify_one();
 
     let mut started = control.lock().unwrap();
+    started.ep_configured = true;
+    cond.notify_one();
+
     while !started.acq_started {
         started = cond.wait(started).unwrap();
     }
 
+    println!("ending data taking thread");
     Ok(())
 }
