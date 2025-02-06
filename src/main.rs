@@ -5,6 +5,7 @@ use std::{
     io,
     sync::{Arc, Condvar, Mutex},
     thread,
+    time::{Duration, Instant},
 };
 
 const EVENT_FORMAT: &str = " \
@@ -23,7 +24,39 @@ const TEST_FORMAT: &str = " \
 	] \
 ";
 
-fn main() -> Result<(), FELibError> {
+#[derive(Clone, Copy)]
+struct Counter {
+    total_size: usize,
+    n_events: usize,
+    t_begin: Instant,
+}
+
+impl Counter {
+    fn new() -> Self {
+        Self {
+            total_size: 0,
+            n_events: 0,
+            t_begin: Instant::now(),
+        }
+    }
+
+    fn from(counter: &Self) -> Self {
+        Self { ..*counter }
+    }
+
+    fn increment(&mut self, size: usize) {
+        self.total_size += size;
+        self.n_events += 1;
+    }
+
+    fn reset(&mut self) {
+        self.total_size = 0;
+        self.n_events = 0;
+        self.t_begin = Instant::now();
+    }
+}
+
+fn main() -> Result<(), FELibReturn> {
     // connect to digitizer
     let dev_handle = felib_open("dig2://caendgtz-usb-25380")?;
 
@@ -42,7 +75,7 @@ fn main() -> Result<(), FELibError> {
     println!("cup ver: {cupver}");
 
     // get num channels
-    let num_chan = numch.parse::<usize>().map_err(|_| FELibError::Unknown)?;
+    let num_chan = numch.parse::<usize>().map_err(|_| FELibReturn::Unknown)?;
 
     // reset
     felib_sendcommand(dev_handle, "/cmd/reset")?;
@@ -107,6 +140,8 @@ fn main() -> Result<(), FELibError> {
         }
     }
 
+    // end acquisition
+    felib_sendcommand(dev_handle, "/cmd/swendacquisition")?;
     felib_sendcommand(dev_handle, "/cmd/disarmacquisition")?;
 
     let _ = handle.join().unwrap();
@@ -118,7 +153,7 @@ fn main() -> Result<(), FELibError> {
     Ok(())
 }
 
-fn data_taking(acq_control: Arc<(Mutex<AcqControl>, Condvar)>) -> Result<(), FELibError> {
+fn data_taking(acq_control: Arc<(Mutex<AcqControl>, Condvar)>) -> Result<(), FELibReturn> {
     let (control, cond) = &*acq_control;
     // configure endpoint
     let mut ep_handle = 0;
@@ -130,18 +165,54 @@ fn data_taking(acq_control: Arc<(Mutex<AcqControl>, Condvar)>) -> Result<(), FEL
     )?;
     felib_getparenthandle(ep_handle, "", &mut ep_folder_handle)?;
     felib_setvalue(ep_folder_handle, "/par/activeendpoint", "scope")?;
-    felib_setreaddataformat(ep_handle, TEST_FORMAT)?;
+    felib_setreaddataformat(ep_handle, EVENT_FORMAT)?;
 
+    // signal main thread endpoint is configured
     {
         let mut started = control.lock().unwrap();
         started.ep_configured = true;
         cond.notify_one();
     }
 
+    // wait on main thread to being acquisition
     {
         let mut started = control.lock().unwrap();
         while !started.acq_started {
             started = cond.wait(started).unwrap();
+        }
+    }
+
+    let mut event = EventWrapper::new(1, 1024);
+
+    let mut total = Counter::new();
+    let mut current = Counter::from(&total);
+
+    loop {
+        // print the run stats
+        if current.t_begin.elapsed() > Duration::from_secs(1) {
+            println!(
+                "\x1b[1K\rTime (s): {}\tEvents: {}\tReadout rate (MB/s): {}",
+                total.t_begin.elapsed().as_secs(),
+                total.n_events,
+                current.total_size as f64
+                    / current.t_begin.elapsed().as_secs_f64()
+                    / (1024.0 * 1024.0)
+            );
+        }
+        let ret = felib_readdata(ep_handle, &mut event);
+        match ret {
+            FELibReturn::Success => {
+                println!("read data");
+                println!("timestamp: {}", event.c_event.timestamp);
+                println!("trigger id: {}", event.c_event.trigger_id);
+                println!("waveform: {:?}", event.c_event.waveform);
+                total.increment(event.c_event.event_size);
+                current.increment(event.c_event.event_size);
+                return Ok(());
+            }
+            FELibReturn::Timeout => (),
+            FELibReturn::Stop => break,
+            _ => (),
         }
     }
 
