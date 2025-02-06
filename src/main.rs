@@ -72,18 +72,16 @@ fn main() -> Result<(), FELibError> {
     // wait for endpoint configuration before data taking
     let (control, cond) = &*acq_control;
     {
-        let started = control.lock().unwrap();
-        drop(
-            cond.wait_while(started, |state| !state.ep_configured)
-                .unwrap(),
-        );
+        let mut started = control.lock().unwrap();
+        while !started.ep_configured {
+            started = cond.wait(started).unwrap();
+        }
     }
     // begin acquisition
     felib_sendcommand(dev_handle, "/cmd/armacquisition")?;
     felib_sendcommand(dev_handle, "/cmd/swstartacquisition")?;
 
     {
-        let (control, cond) = &*acq_control;
         let mut started = control.lock().unwrap();
         started.acq_started = true;
         cond.notify_one();
@@ -141,11 +139,10 @@ fn data_taking(acq_control: Arc<(Mutex<AcqControl>, Condvar)>) -> Result<(), FEL
     }
 
     {
-        let started = control.lock().unwrap();
-        drop(
-            cond.wait_while(started, |state| !state.acq_started)
-                .unwrap(),
-        );
+        let mut started = control.lock().unwrap();
+        while !started.acq_started {
+            started = cond.wait(started).unwrap();
+        }
     }
 
     Ok(())
