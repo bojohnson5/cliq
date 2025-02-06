@@ -114,12 +114,14 @@ impl EventWrapper {
         let mut waveform_ptrs = waveform_ptrs_vec.into_boxed_slice();
 
         // Allocate the arrays for n_samples and n_allocated_samples.
-        let n_samples = vec![0usize; n_channels].into_boxed_slice();
-        let n_allocated_samples = vec![0usize; n_channels].into_boxed_slice();
+        let mut n_samples = vec![0usize; n_channels].into_boxed_slice();
+        let mut n_allocated_samples = vec![0usize; n_channels].into_boxed_slice();
 
         // IMPORTANT: Use as_mut_ptr() here so that the returned pointer
         // is actually mutable.
         let waveform_ptr = waveform_ptrs.as_mut_ptr();
+        let n_samples_ptr = n_samples.as_mut_ptr();
+        let n_allocated_samples_ptr = n_allocated_samples.as_mut_ptr();
 
         // Build the C-compatible event. We obtain raw pointers from the boxes.
         let c_event = CEvent {
@@ -128,8 +130,8 @@ impl EventWrapper {
             trigger_id: 0,
             event_size: 0,
             waveform: waveform_ptr,
-            n_samples: n_samples.as_ptr() as *mut usize,
-            n_allocated_samples: n_allocated_samples.as_ptr() as *mut usize,
+            n_samples: n_samples_ptr,
+            n_allocated_samples: n_allocated_samples_ptr,
             n_channels,
         };
 

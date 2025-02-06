@@ -24,7 +24,7 @@ const TEST_FORMAT: &str = " \
 	] \
 ";
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 struct Counter {
     total_size: usize,
     n_events: usize,
@@ -141,7 +141,7 @@ fn main() -> Result<(), FELibReturn> {
     }
 
     // end acquisition
-    felib_sendcommand(dev_handle, "/cmd/swendacquisition")?;
+    // felib_sendcommand(dev_handle, "/cmd/swendacquisition")?;
     felib_sendcommand(dev_handle, "/cmd/disarmacquisition")?;
 
     let _ = handle.join().unwrap();
@@ -165,7 +165,8 @@ fn data_taking(acq_control: Arc<(Mutex<AcqControl>, Condvar)>) -> Result<(), FEL
     )?;
     felib_getparenthandle(ep_handle, "", &mut ep_folder_handle)?;
     felib_setvalue(ep_folder_handle, "/par/activeendpoint", "scope")?;
-    felib_setreaddataformat(ep_handle, EVENT_FORMAT)?;
+    felib_setreaddataformat(ep_handle, TEST_FORMAT)?;
+    // felib_setreaddataformat(ep_handle, EVENT_FORMAT)?;
 
     // signal main thread endpoint is configured
     {
@@ -189,15 +190,18 @@ fn data_taking(acq_control: Arc<(Mutex<AcqControl>, Condvar)>) -> Result<(), FEL
 
     loop {
         // print the run stats
-        if current.t_begin.elapsed() > Duration::from_secs(1) {
-            print!(
-                "\x1b[1K\rTime (s): {}\tEvents: {}\tReadout rate (MB/s): {}",
-                total.t_begin.elapsed().as_secs(),
-                total.n_events,
-                current.total_size as f64
-                    / current.t_begin.elapsed().as_secs_f64()
-                    / (1024.0 * 1024.0)
-            );
+        if current.t_begin.elapsed() > Duration::from_secs(3) {
+            // print!(
+            //     "\x1b[1K\rTime (s): {}\tEvents: {}\tReadout rate (MB/s): {}",
+            //     total.t_begin.elapsed().as_secs(),
+            //     total.n_events,
+            //     current.total_size as f64
+            //         / current.t_begin.elapsed().as_secs_f64()
+            //         / (1024.0 * 1024.0)
+            // );
+            println!("total: {:?}", total);
+            println!("event size: {}", event.c_event.event_size);
+            println!("timestamp: {}", event.c_event.timestamp);
         }
         let ret = felib_readdata(ep_handle, &mut event);
         match ret {
@@ -208,7 +212,7 @@ fn data_taking(acq_control: Arc<(Mutex<AcqControl>, Condvar)>) -> Result<(), FEL
                 // println!("waveform: {:?}", event.c_event.waveform);
                 total.increment(event.c_event.event_size);
                 current.increment(event.c_event.event_size);
-                return Ok(());
+                // return Ok(());
             }
             FELibReturn::Timeout => (),
             FELibReturn::Stop => break,
