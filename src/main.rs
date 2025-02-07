@@ -1,12 +1,14 @@
 #![allow(dead_code)]
 
+use core::str;
 use rust_daq::*;
 use std::{
-    io,
+    io::{stdin, Read},
     sync::{Arc, Condvar, Mutex},
     thread,
     time::{Duration, Instant},
 };
+use termion::raw::IntoRawMode;
 
 const EVENT_FORMAT: &str = " \
 	[ \
@@ -23,6 +25,19 @@ const TEST_FORMAT: &str = " \
 		{ \"name\" : \"TRIGGER_ID\", \"type\" : \"U32\" } \
 	] \
 ";
+
+fn getch() -> std::io::Result<[u8; 1]> {
+    // We need to switch stdout into raw mode (which disables line buffering,
+    // echoing, etc). Dropping the raw mode handle will restore the original mode.
+    let _stdout = std::io::stdout().into_raw_mode()?;
+
+    // Read one byte from stdin.
+    let mut stdin = stdin();
+    let mut buf = [0];
+    stdin.read_exact(&mut buf)?;
+
+    Ok(buf)
+}
 
 #[derive(Clone, Copy, Debug)]
 struct Counter {
@@ -136,13 +151,10 @@ fn main() -> Result<(), FELibReturn> {
 
     let mut quit = false;
     while !quit {
-        let mut input = String::new();
-        io::stdin()
-            .read_line(&mut input)
-            .expect("error getting input");
-        match input.trim() {
-            "t" => felib_sendcommand(dev_handle, "/cmd/sendswtrigger")?,
-            "s" => quit = true,
+        let input = getch().map_err(|_| FELibReturn::InvalidParam)?;
+        match &input {
+            b"t" => felib_sendcommand(dev_handle, "/cmd/sendswtrigger")?,
+            b"s" => quit = true,
             _ => (),
         }
     }
