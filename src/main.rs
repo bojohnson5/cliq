@@ -203,23 +203,29 @@ fn data_taking(acq_control: Arc<(Mutex<AcqControl>, Condvar)>) -> Result<(), FEL
         }
     }
 
-    let mut event = EventWrapper::new(1, 1024);
+    let mut event = EventWrapper::new(control.lock().unwrap().num_ch, 1024);
 
     let mut total = Counter::new();
     let mut current = Counter::from(&total);
+    let mut previous_time = Instant::now();
 
     loop {
         // print the run stats
-        if Instant::now().duration_since(current.t_begin) > Duration::from_secs(3) {
-            print!(
-                "\x1b[1K\rTime (s): {}\tEvents: {}\tReadout rate (MB/s): {:.2}",
-                total.t_begin.elapsed().as_secs(),
-                total.n_events,
-                current.total_size as f64
-                    / current.t_begin.elapsed().as_secs_f64()
-                    / (1024.0 * 1024.0)
-            );
+        if Instant::now().duration_since(previous_time) > Duration::from_secs(3) {
+            // print!(
+            //     "\x1b[1K\rTime (s): {}\tEvents: {}\tReadout rate (MB/s): {:.2}",
+            //     total.t_begin.elapsed().as_secs(),
+            //     total.n_events,
+            //     current.total_size as f64
+            //         / current.t_begin.elapsed().as_secs_f64()
+            //         / (1024.0 * 1024.0)
+            // );
+            println!("timestamp: {}", event.c_event.timestamp);
+            println!("trigger id: {}", event.c_event.trigger_id);
+            println!("event size: {}", event.c_event.event_size);
+            println!("waveform size: {:?}", event.n_samples);
             current.reset();
+            previous_time = Instant::now();
         }
         let ret = felib_readdata(ep_handle, &mut event);
         match ret {

@@ -82,12 +82,12 @@ pub struct EventWrapper {
     pub c_event: CEvent,
 
     // Owned memory: the actual waveform buffers.
-    waveform_buffers: Vec<Box<[u16]>>,
+    pub waveform_buffers: Vec<Box<[u16]>>,
     // Owned slice of waveform pointers. We need to keep this alive so that
     // `c_event.waveform` (a raw pointer into it) remains valid.
     waveform_ptrs: Box<[*mut u16]>,
     // Owned memory for the per-channel arrays.
-    n_samples: Box<[usize]>,
+    pub n_samples: Box<[usize]>,
     n_allocated_samples: Box<[usize]>,
 }
 
