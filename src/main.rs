@@ -185,8 +185,8 @@ fn data_taking(acq_control: Arc<(Mutex<AcqControl>, Condvar)>) -> Result<(), FEL
     )?;
     felib_getparenthandle(ep_handle, "", &mut ep_folder_handle)?;
     felib_setvalue(ep_folder_handle, "/par/activeendpoint", "scope")?;
-    felib_setreaddataformat(ep_handle, TEST_FORMAT)?;
-    // felib_setreaddataformat(ep_handle, EVENT_FORMAT)?;
+    // felib_setreaddataformat(ep_handle, TEST_FORMAT)?;
+    felib_setreaddataformat(ep_handle, EVENT_FORMAT)?;
 
     // signal main thread endpoint is configured
     {
@@ -223,7 +223,6 @@ fn data_taking(acq_control: Arc<(Mutex<AcqControl>, Condvar)>) -> Result<(), FEL
             println!("timestamp: {}", event.c_event.timestamp);
             println!("trigger id: {}", event.c_event.trigger_id);
             println!("event size: {}", event.c_event.event_size);
-            println!("waveform size: {:?}", event.n_samples);
             current.reset();
             previous_time = Instant::now();
         }
