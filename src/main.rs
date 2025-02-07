@@ -1,9 +1,7 @@
-#![allow(dead_code)]
-
 use core::str;
 use rust_daq::*;
 use std::{
-    io::{stdin, Read},
+    io::{stdin, stdout, Read, Write},
     sync::{Arc, Condvar, Mutex},
     thread,
     time::{Duration, Instant},
@@ -17,12 +15,6 @@ const EVENT_FORMAT: &str = " \
 		{ \"name\" : \"WAVEFORM\", \"type\" : \"U16\", \"dim\" : 2 }, \
 		{ \"name\" : \"WAVEFORM_SIZE\", \"type\" : \"SIZE_T\", \"dim\" : 1 }, \
 		{ \"name\" : \"EVENT_SIZE\", \"type\" : \"SIZE_T\" } \
-	] \
-";
-const TEST_FORMAT: &str = " \
-	[ \
-		{ \"name\" : \"TIMESTAMP\", \"type\" : \"U64\" }, \
-		{ \"name\" : \"TRIGGER_ID\", \"type\" : \"U32\" } \
 	] \
 ";
 
@@ -219,6 +211,7 @@ fn data_taking(acq_control: Arc<(Mutex<AcqControl>, Condvar)>) -> Result<(), FEL
                     / current.t_begin.elapsed().as_secs_f64()
                     / (1024.0 * 1024.0)
             );
+            stdout().flush().expect("couldn't flush stdout");
             current.reset();
             previous_time = Instant::now();
         }
