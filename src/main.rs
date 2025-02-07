@@ -185,7 +185,6 @@ fn data_taking(acq_control: Arc<(Mutex<AcqControl>, Condvar)>) -> Result<(), FEL
     )?;
     felib_getparenthandle(ep_handle, "", &mut ep_folder_handle)?;
     felib_setvalue(ep_folder_handle, "/par/activeendpoint", "scope")?;
-    // felib_setreaddataformat(ep_handle, TEST_FORMAT)?;
     felib_setreaddataformat(ep_handle, EVENT_FORMAT)?;
 
     // signal main thread endpoint is configured
@@ -211,18 +210,15 @@ fn data_taking(acq_control: Arc<(Mutex<AcqControl>, Condvar)>) -> Result<(), FEL
 
     loop {
         // print the run stats
-        if Instant::now().duration_since(previous_time) > Duration::from_secs(3) {
-            // print!(
-            //     "\x1b[1K\rTime (s): {}\tEvents: {}\tReadout rate (MB/s): {:.2}",
-            //     total.t_begin.elapsed().as_secs(),
-            //     total.n_events,
-            //     current.total_size as f64
-            //         / current.t_begin.elapsed().as_secs_f64()
-            //         / (1024.0 * 1024.0)
-            // );
-            println!("timestamp: {}", event.c_event.timestamp);
-            println!("trigger id: {}", event.c_event.trigger_id);
-            println!("event size: {}", event.c_event.event_size);
+        if Instant::now().duration_since(previous_time) > Duration::from_secs(1) {
+            print!(
+                "\x1b[1K\rTime (s): {}\tEvents: {}\tReadout rate (MB/s): {:.2}",
+                total.t_begin.elapsed().as_secs(),
+                total.n_events,
+                current.total_size as f64
+                    / current.t_begin.elapsed().as_secs_f64()
+                    / (1024.0 * 1024.0)
+            );
             current.reset();
             previous_time = Instant::now();
         }
