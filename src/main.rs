@@ -2,7 +2,7 @@ use core::str;
 use rust_daq::*;
 use std::{
     io::{stdin, stdout, Read, Write},
-    sync::{Arc, Condvar, Mutex},
+    sync::{mpsc, Arc, Condvar, Mutex},
     thread,
     time::{Duration, Instant},
 };
@@ -134,19 +134,39 @@ fn main() -> Result<(), FELibReturn> {
         cond.notify_one();
     }
 
-    // watch for commands from user
-    println!("#################################");
-    println!("Commands supported:");
-    println!("\t[t]\tsend manual trigger");
-    println!("\t[s]\tstop acquisition");
-    println!("#################################");
+    let (tx, rx) = mpsc::channel();
+
+    let input_handle = thread::spawn(move || {
+        // watch for commands from user
+        println!("#################################");
+        println!("Commands supported:");
+        println!("\t[t]\tsend manual trigger");
+        println!("\t[s]\tstop acquisition");
+        println!("#################################");
+        match getch() {
+            Ok(c) => match &c {
+                b"s" => {
+                    let _ = tx.send(c);
+                }
+                _ => (),
+            },
+            Err(_) => println!("error getting input"),
+        }
+    });
 
     let mut quit = false;
+    let timeout_duration = Duration::from_secs(30);
     while !quit {
-        let input = getch().map_err(|_| FELibReturn::InvalidParam)?;
-        match &input {
-            b"t" => felib_sendcommand(dev_handle, "/cmd/sendswtrigger")?,
-            b"s" => quit = true,
+        match rx.recv_timeout(timeout_duration) {
+            Ok(c) => match &c {
+                b"s" => quit = true,
+                b"t" => felib_sendcommand(dev_handle, "/cmd/sendswtrigger")?,
+                _ => (),
+            },
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                println!("Ending run...");
+                quit = true;
+            }
             _ => (),
         }
     }
@@ -157,6 +177,7 @@ fn main() -> Result<(), FELibReturn> {
     println!("done.");
 
     let _ = handle.join().unwrap();
+    let _ = input_handle.join().unwrap();
 
     felib_close(dev_handle)?;
 
