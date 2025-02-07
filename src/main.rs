@@ -112,13 +112,13 @@ fn main() -> Result<(), FELibReturn> {
 
     // configure digitizer before running
     print!("Configuring...\t");
-    felib_setvalue(dev_handle, "/ch/0/par/ChEnable", "true")?;
+    felib_setvalue(dev_handle, "/ch/0..63/par/ChEnable", "true")?;
     felib_setvalue(dev_handle, "/par/RecordLengthS", "1024")?;
     felib_setvalue(dev_handle, "/par/PreTriggerS", "100")?;
     felib_setvalue(dev_handle, "/par/AcqTriggerSource", "SwTrg | TestPulse")?;
     felib_setvalue(dev_handle, "/par/TestPulsePeriod", "100000000.0")?;
     felib_setvalue(dev_handle, "/par/TestPulseWidth", "1000")?;
-    felib_setvalue(dev_handle, "/ch/0/par/DCOffset", "50.0")?;
+    felib_setvalue(dev_handle, "/ch/0..63/par/DCOffset", "50.0")?;
     println!("done.");
 
     // wait for endpoint configuration before data taking
