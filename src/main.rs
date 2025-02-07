@@ -62,23 +62,25 @@ fn main() -> Result<(), FELibReturn> {
 
     // print dev details
     let model = felib_getvalue(dev_handle, "/par/ModelName")?;
-    println!("model: {model}");
+    println!("Model name:\t{model}");
     let serialnum = felib_getvalue(dev_handle, "/par/SerialNum")?;
-    println!("serialnum: {serialnum}");
+    println!("Serial number:\t{serialnum}");
     let adc_nbit = felib_getvalue(dev_handle, "/par/ADC_Nbit")?;
-    println!("adc_nbit: {adc_nbit}");
+    println!("ADC bits:\t{adc_nbit}");
     let numch = felib_getvalue(dev_handle, "/par/NumCh")?;
-    println!("num ch: {numch}");
+    println!("Channels:\t{numch}");
     let samplerate = felib_getvalue(dev_handle, "/par/ADC_SamplRate")?;
-    println!("sample rate: {samplerate}");
+    println!("ADC rate:\t{samplerate}");
     let cupver = felib_getvalue(dev_handle, "/par/cupver")?;
-    println!("cup ver: {cupver}");
+    println!("CUP version:\t{cupver}");
 
     // get num channels
     let num_chan = numch.parse::<usize>().map_err(|_| FELibReturn::Unknown)?;
 
     // reset
+    print!("Resetting...\t");
     felib_sendcommand(dev_handle, "/cmd/reset")?;
+    println!("done.");
 
     // send acq_control to a new thread where it will configure endpoints and get ready
     // to read events
@@ -94,6 +96,7 @@ fn main() -> Result<(), FELibReturn> {
     let handle = thread::spawn(|| data_taking(shared_acq_control));
 
     // configure digitizer before running
+    print!("Configuring...\t");
     felib_setvalue(dev_handle, "/ch/0/par/ChEnable", "true")?;
     felib_setvalue(dev_handle, "/par/RecordLengthS", "1024")?;
     felib_setvalue(dev_handle, "/par/PreTriggerS", "100")?;
@@ -101,6 +104,7 @@ fn main() -> Result<(), FELibReturn> {
     felib_setvalue(dev_handle, "/par/TestPulsePeriod", "100000000.0")?;
     felib_setvalue(dev_handle, "/par/TestPulseWidth", "1000")?;
     felib_setvalue(dev_handle, "/ch/0/par/DCOffset", "50.0")?;
+    println!("done.");
 
     // wait for endpoint configuration before data taking
     let (control, cond) = &*acq_control;
@@ -110,9 +114,12 @@ fn main() -> Result<(), FELibReturn> {
             started = cond.wait(started).unwrap();
         }
     }
+
     // begin acquisition
+    print!("Starting...\t");
     felib_sendcommand(dev_handle, "/cmd/armacquisition")?;
     felib_sendcommand(dev_handle, "/cmd/swstartacquisition")?;
+    println!("done.");
 
     {
         let mut started = control.lock().unwrap();
@@ -121,11 +128,11 @@ fn main() -> Result<(), FELibReturn> {
     }
 
     // watch for commands from user
-    println!("##############################");
+    println!("#################################");
     println!("Commands supported:");
     println!("\t[t]\tsend manual trigger");
     println!("\t[s]\tstop acquisition");
-    println!("##############################");
+    println!("#################################");
 
     let mut quit = false;
     while !quit {
@@ -141,8 +148,9 @@ fn main() -> Result<(), FELibReturn> {
     }
 
     // end acquisition
-    // felib_sendcommand(dev_handle, "/cmd/swendacquisition")?;
+    print!("\nStopping...\t");
     felib_sendcommand(dev_handle, "/cmd/disarmacquisition")?;
+    println!("done.");
 
     let _ = handle.join().unwrap();
 
@@ -190,32 +198,28 @@ fn data_taking(acq_control: Arc<(Mutex<AcqControl>, Condvar)>) -> Result<(), FEL
 
     loop {
         // print the run stats
-        if current.t_begin.elapsed() > Duration::from_secs(3) {
-            // print!(
-            //     "\x1b[1K\rTime (s): {}\tEvents: {}\tReadout rate (MB/s): {}",
-            //     total.t_begin.elapsed().as_secs(),
-            //     total.n_events,
-            //     current.total_size as f64
-            //         / current.t_begin.elapsed().as_secs_f64()
-            //         / (1024.0 * 1024.0)
-            // );
-            println!("total: {:?}", total);
-            println!("event size: {}", event.c_event.event_size);
-            println!("timestamp: {}", event.c_event.timestamp);
+        if Instant::now().duration_since(current.t_begin) > Duration::from_secs(3) {
+            print!(
+                "\x1b[1K\rTime (s): {}\tEvents: {}\tReadout rate (MB/s): {:.2}",
+                total.t_begin.elapsed().as_secs(),
+                total.n_events,
+                current.total_size as f64
+                    / current.t_begin.elapsed().as_secs_f64()
+                    / (1024.0 * 1024.0)
+            );
+            current.reset();
         }
         let ret = felib_readdata(ep_handle, &mut event);
         match ret {
             FELibReturn::Success => {
-                // println!("read data");
-                // println!("timestamp: {}", event.c_event.timestamp);
-                // println!("trigger id: {}", event.c_event.trigger_id);
-                // println!("waveform: {:?}", event.c_event.waveform);
                 total.increment(event.c_event.event_size);
                 current.increment(event.c_event.event_size);
-                // return Ok(());
             }
             FELibReturn::Timeout => (),
-            FELibReturn::Stop => break,
+            FELibReturn::Stop => {
+                println!("\nStop received.");
+                break;
+            }
             _ => (),
         }
     }
