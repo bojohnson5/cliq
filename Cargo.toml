@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-termion = "4.0.3"
+crossterm = "0.28.1"
 
 [build-dependencies]
 bindgen = "0.71.0"

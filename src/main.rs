@@ -1,4 +1,5 @@
 use core::str;
+use crossterm::terminal;
 use rust_daq::*;
 use std::{
     io::{stdin, stdout, Read, Write},
@@ -6,7 +7,6 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use termion::raw::IntoRawMode;
 
 const EVENT_FORMAT: &str = " \
 	[ \
@@ -19,14 +19,14 @@ const EVENT_FORMAT: &str = " \
 ";
 
 fn getch() -> std::io::Result<[u8; 1]> {
-    // We need to switch stdout into raw mode (which disables line buffering,
-    // echoing, etc). Dropping the raw mode handle will restore the original mode.
-    let _stdout = std::io::stdout().into_raw_mode()?;
+    terminal::enable_raw_mode()?;
 
     // Read one byte from stdin.
     let mut stdin = stdin();
     let mut buf = [0];
     stdin.read_exact(&mut buf)?;
+
+    terminal::disable_raw_mode()?;
 
     Ok(buf)
 }
@@ -136,7 +136,7 @@ fn main() -> Result<(), FELibReturn> {
 
     let (tx, rx) = mpsc::channel();
 
-    let input_handle = thread::spawn(move || {
+    let _input_handle = thread::spawn(move || {
         // watch for commands from user
         println!("#################################");
         println!("Commands supported:");
@@ -144,18 +144,16 @@ fn main() -> Result<(), FELibReturn> {
         println!("\t[s]\tstop acquisition");
         println!("#################################");
         match getch() {
-            Ok(c) => match &c {
-                b"s" => {
-                    let _ = tx.send(c);
-                }
-                _ => (),
-            },
-            Err(_) => println!("error getting input"),
+            Ok(c) => tx.send(c),
+            Err(_) => {
+                print!("error getting input");
+                Ok(())
+            }
         }
     });
 
     let mut quit = false;
-    let timeout_duration = Duration::from_secs(30);
+    let timeout_duration = Duration::from_secs(10);
     while !quit {
         match rx.recv_timeout(timeout_duration) {
             Ok(c) => match &c {
@@ -164,7 +162,8 @@ fn main() -> Result<(), FELibReturn> {
                 _ => (),
             },
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                println!("Ending run...");
+                terminal::disable_raw_mode().map_err(|_| FELibReturn::Generic)?;
+                println!("\nEnding run...");
                 quit = true;
             }
             _ => (),
@@ -177,7 +176,6 @@ fn main() -> Result<(), FELibReturn> {
     println!("done.");
 
     let _ = handle.join().unwrap();
-    let _ = input_handle.join().unwrap();
 
     felib_close(dev_handle)?;
 
@@ -225,7 +223,7 @@ fn data_taking(acq_control: Arc<(Mutex<AcqControl>, Condvar)>) -> Result<(), FEL
         // print the run stats
         if Instant::now().duration_since(previous_time) > Duration::from_secs(1) {
             print!(
-                "\x1b[1K\rTime (s): {}\tEvents: {}\tReadout rate (MB/s): {:.2}",
+                "\x1b[1K\rTime (s): {}\tEvents: {}\tReadout rate (MB/s): {:.3}",
                 total.t_begin.elapsed().as_secs(),
                 total.n_events,
                 current.total_size as f64
