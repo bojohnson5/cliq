@@ -1,3 +1,4 @@
+use confique::Config;
 use core::str;
 use crossterm::terminal;
 use rust_daq::*;
@@ -67,6 +68,11 @@ fn main() -> Result<(), FELibReturn> {
     // connect to digitizer
     let dev_handle = felib_open("dig2://caendgtz-usb-25380")?;
 
+    let mut dig = Dig2::from_file("config.toml").map_err(|_| FELibReturn::DevNotFound)?;
+    dig.open()?;
+
+    return Ok(());
+
     // print dev details
     let model = felib_getvalue(dev_handle, "/par/ModelName")?;
     println!("Model name:\t{model}");
@@ -92,7 +98,7 @@ fn main() -> Result<(), FELibReturn> {
     // send acq_control to a new thread where it will configure endpoints and get ready
     // to read events
     let acq_control = AcqControl {
-        dev_handle,
+        dig,
         ep_configured: false,
         acq_started: false,
         num_ch: num_chan,
