@@ -71,20 +71,18 @@ fn main() -> Result<(), FELibReturn> {
     let mut dig = Dig2::from_file("config.toml").map_err(|_| FELibReturn::DevNotFound)?;
     dig.open()?;
 
-    return Ok(());
-
     // print dev details
-    let model = felib_getvalue(dev_handle, "/par/ModelName")?;
+    let model = dig.getvalue("/par/ModelName")?;
     println!("Model name:\t{model}");
-    let serialnum = felib_getvalue(dev_handle, "/par/SerialNum")?;
+    let serialnum = dig.getvalue("/par/SerialNum")?;
     println!("Serial number:\t{serialnum}");
-    let adc_nbit = felib_getvalue(dev_handle, "/par/ADC_Nbit")?;
+    let adc_nbit = dig.getvalue("/par/ADC_Nbit")?;
     println!("ADC bits:\t{adc_nbit}");
-    let numch = felib_getvalue(dev_handle, "/par/NumCh")?;
+    let numch = dig.getvalue("/par/NumCh")?;
     println!("Channels:\t{numch}");
-    let samplerate = felib_getvalue(dev_handle, "/par/ADC_SamplRate")?;
+    let samplerate = dig.getvalue("/par/ADC_SamplRate")?;
     println!("ADC rate:\t{samplerate}");
-    let cupver = felib_getvalue(dev_handle, "/par/cupver")?;
+    let cupver = dig.getvalue("/par/cupver")?;
     println!("CUP version:\t{cupver}");
 
     // get num channels
@@ -92,7 +90,7 @@ fn main() -> Result<(), FELibReturn> {
 
     // reset
     print!("Resetting...\t");
-    felib_sendcommand(dev_handle, "/cmd/reset")?;
+    dig.sendcommand("/cmd/reset")?;
     println!("done.");
 
     // send acq_control to a new thread where it will configure endpoints and get ready
@@ -110,13 +108,13 @@ fn main() -> Result<(), FELibReturn> {
 
     // configure digitizer before running
     print!("Configuring...\t");
-    felib_setvalue(dev_handle, "/ch/0..63/par/ChEnable", "true")?;
-    felib_setvalue(dev_handle, "/par/RecordLengthS", "1024")?;
-    felib_setvalue(dev_handle, "/par/PreTriggerS", "100")?;
-    felib_setvalue(dev_handle, "/par/AcqTriggerSource", "SwTrg | TestPulse")?;
-    felib_setvalue(dev_handle, "/par/TestPulsePeriod", "100000000.0")?;
-    felib_setvalue(dev_handle, "/par/TestPulseWidth", "1000")?;
-    felib_setvalue(dev_handle, "/ch/0..63/par/DCOffset", "50.0")?;
+    dig.setvalue("/ch/0..63/par/ChEnable", "true")?;
+    dig.setvalue("/par/RecordLengthS", "1024")?;
+    dig.setvalue("/par/PreTriggerS", "100")?;
+    dig.setvalue("/par/AcqTriggerSource", "SwTrg | TestPulse")?;
+    dig.setvalue("/par/TestPulsePeriod", "100000000.0")?;
+    dig.setvalue("/par/TestPulseWidth", "1000")?;
+    dig.setvalue("/ch/0..63/par/DCOffset", "50.0")?;
     println!("done.");
 
     // wait for endpoint configuration before data taking
@@ -130,8 +128,8 @@ fn main() -> Result<(), FELibReturn> {
 
     // begin acquisition
     print!("Starting...\t");
-    felib_sendcommand(dev_handle, "/cmd/armacquisition")?;
-    felib_sendcommand(dev_handle, "/cmd/swstartacquisition")?;
+    dig.sendcommand("/cmd/armacquisition")?;
+    dig.sendcommand("/cmd/swstartacquisition")?;
     println!("done.");
 
     {
@@ -164,7 +162,7 @@ fn main() -> Result<(), FELibReturn> {
         match rx.recv_timeout(timeout_duration) {
             Ok(c) => match &c {
                 b"s" => quit = true,
-                b"t" => felib_sendcommand(dev_handle, "/cmd/sendswtrigger")?,
+                b"t" => dig.sendcommand("/cmd/sendswtrigger")?,
                 _ => (),
             },
             Err(mpsc::RecvTimeoutError::Timeout) => {
@@ -178,12 +176,12 @@ fn main() -> Result<(), FELibReturn> {
 
     // end acquisition
     print!("\nStopping...\t");
-    felib_sendcommand(dev_handle, "/cmd/disarmacquisition")?;
+    dig.sendcommand("/cmd/disarmacquisition")?;
     println!("done.");
 
     let _ = handle.join().unwrap();
 
-    felib_close(dev_handle)?;
+    dig.close();
 
     println!("TTFN!");
 
@@ -196,7 +194,7 @@ fn data_taking(acq_control: Arc<(Mutex<AcqControl>, Condvar)>) -> Result<(), FEL
     let mut ep_handle = 0;
     let mut ep_folder_handle = 0;
     felib_gethandle(
-        control.lock().unwrap().dev_handle,
+        control.lock().unwrap().dig.handle,
         "/endpoint/scope",
         &mut ep_handle,
     )?;

@@ -244,7 +244,7 @@ impl Dig2 {
         }
     }
 
-    pub fn close(self) -> Result<(), FELibReturn> {
+    pub fn close(&self) -> Result<(), FELibReturn> {
         let res = unsafe { CAEN_FELib_Close(self.handle) };
         let res = FELibReturn::from(res);
         match res {
@@ -253,7 +253,7 @@ impl Dig2 {
         }
     }
 
-    pub fn getimpllibversion(self) -> Result<String, FELibReturn> {
+    pub fn getimpllibversion(&self) -> Result<String, FELibReturn> {
         let mut libv = vec![0u8; 16];
         let res =
             unsafe { CAEN_FELib_GetImplLibVersion(self.handle, libv.as_mut_ptr() as *mut i8) };
@@ -265,7 +265,7 @@ impl Dig2 {
         }
     }
 
-    pub fn getdevicetree(self) -> Result<String, FELibReturn> {
+    pub fn getdevicetree(&self) -> Result<String, FELibReturn> {
         let buffer_size = 1024;
         let mut dev_tree = vec![0u8; buffer_size];
         let res = unsafe {
@@ -279,7 +279,7 @@ impl Dig2 {
         }
     }
 
-    pub fn getvalue(self, path: &str) -> Result<String, FELibReturn> {
+    pub fn getvalue(&self, path: &str) -> Result<String, FELibReturn> {
         let mut value = vec![0u8; 256];
         let path = CString::new(path).unwrap();
         let res = unsafe {
@@ -293,7 +293,7 @@ impl Dig2 {
         }
     }
 
-    pub fn setvalue(self, path: &str, value: &str) -> Result<(), FELibReturn> {
+    pub fn setvalue(&self, path: &str, value: &str) -> Result<(), FELibReturn> {
         let path = CString::new(path).unwrap();
         let value = CString::new(value).unwrap();
         let res = unsafe { CAEN_FELib_SetValue(self.handle, path.as_ptr(), value.as_ptr()) };
@@ -304,7 +304,7 @@ impl Dig2 {
         }
     }
 
-    pub fn sendcommand(self, path: &str) -> Result<(), FELibReturn> {
+    pub fn sendcommand(&self, path: &str) -> Result<(), FELibReturn> {
         let path = CString::new(path).unwrap();
         let res = unsafe { CAEN_FELib_SendCommand(self.handle, path.as_ptr()) };
         let res = FELibReturn::from(res);
@@ -314,7 +314,7 @@ impl Dig2 {
         }
     }
 
-    pub fn setreaddataformat(self, format: &str) -> Result<(), FELibReturn> {
+    pub fn setreaddataformat(&self, format: &str) -> Result<(), FELibReturn> {
         let format = CString::new(format).unwrap();
         let res = unsafe { CAEN_FELib_SetReadDataFormat(self.handle, format.as_ptr()) };
         let res = FELibReturn::from(res);
@@ -324,7 +324,7 @@ impl Dig2 {
         }
     }
 
-    pub fn readdata(self, data: &mut EventWrapper) -> FELibReturn {
+    pub fn readdata(&self, data: &mut EventWrapper) -> FELibReturn {
         let res = unsafe {
             CAEN_FELib_ReadData(
                 self.handle,
@@ -339,7 +339,7 @@ impl Dig2 {
         FELibReturn::from(res)
     }
 
-    pub fn hasdata(self) -> Result<(), FELibReturn> {
+    pub fn hasdata(&self) -> Result<(), FELibReturn> {
         let res = unsafe { CAEN_FELib_HasData(self.handle, 5) };
         let res = FELibReturn::from(res);
         match res {
@@ -348,7 +348,7 @@ impl Dig2 {
         }
     }
 
-    pub fn gethandle(self, path: &str, path_handle: &mut u64) -> Result<(), FELibReturn> {
+    pub fn gethandle(&self, path: &str, path_handle: &mut u64) -> Result<(), FELibReturn> {
         let path = CString::new(path).unwrap();
         let res = unsafe { CAEN_FELib_GetHandle(self.handle, path.as_ptr(), path_handle) };
         let res = FELibReturn::from(res);
@@ -358,7 +358,7 @@ impl Dig2 {
         }
     }
 
-    pub fn getparenthandle(self, path: &str, path_handle: &mut u64) -> Result<(), FELibReturn> {
+    pub fn getparenthandle(&self, path: &str, path_handle: &mut u64) -> Result<(), FELibReturn> {
         let path = CString::new(path).unwrap();
         let res = unsafe { CAEN_FELib_GetParentHandle(self.handle, path.as_ptr(), path_handle) };
         let res = FELibReturn::from(res);
