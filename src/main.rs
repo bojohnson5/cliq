@@ -237,19 +237,35 @@ fn data_taking(acq_control: Arc<(Mutex<AcqControl>, Condvar)>) -> Result<(), FEL
             current.reset();
             previous_time = Instant::now();
         }
-        let ret = felib_readdata(ep_handle, &mut event);
-        match ret {
-            FELibReturn::Success => {
-                total.increment(event.c_event.event_size);
-                current.increment(event.c_event.event_size);
+        {
+            let dig = control.lock().unwrap();
+            let ret = dig.dig.readdata(&mut event);
+            match ret {
+                FELibReturn::Success => {
+                    total.increment(event.c_event.event_size);
+                    current.increment(event.c_event.event_size);
+                }
+                FELibReturn::Timeout => (),
+                FELibReturn::Stop => {
+                    println!("\nStop received.");
+                    break;
+                }
+                _ => (),
             }
-            FELibReturn::Timeout => (),
-            FELibReturn::Stop => {
-                println!("\nStop received.");
-                break;
-            }
-            _ => (),
         }
+        // let ret = felib_readdata(ep_handle, &mut event);
+        // match ret {
+        //     FELibReturn::Success => {
+        //         total.increment(event.c_event.event_size);
+        //         current.increment(event.c_event.event_size);
+        //     }
+        //     FELibReturn::Timeout => (),
+        //     FELibReturn::Stop => {
+        //         println!("\nStop received.");
+        //         break;
+        //     }
+        //     _ => (),
+        // }
     }
 
     Ok(())
