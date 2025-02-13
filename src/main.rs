@@ -66,8 +66,6 @@ impl Counter {
 
 fn main() -> Result<(), FELibReturn> {
     // connect to digitizer
-    let dev_handle = felib_open("dig2://caendgtz-usb-25380")?;
-
     let mut dig = Dig2::from_file("config.toml").map_err(|_| FELibReturn::DevNotFound)?;
     dig.open()?;
 
@@ -96,7 +94,7 @@ fn main() -> Result<(), FELibReturn> {
     // send acq_control to a new thread where it will configure endpoints and get ready
     // to read events
     let acq_control = AcqControl {
-        dig,
+        dig: dig.clone(),
         ep_configured: false,
         acq_started: false,
         num_ch: num_chan,
@@ -181,7 +179,7 @@ fn main() -> Result<(), FELibReturn> {
 
     let _ = handle.join().unwrap();
 
-    dig.close();
+    dig.close()?;
 
     println!("TTFN!");
 
