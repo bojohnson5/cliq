@@ -68,6 +68,7 @@ fn main() -> Result<(), FELibReturn> {
     // connect to digitizer
     let mut dig = Dig2::from_file("config.toml").map_err(|_| FELibReturn::DevNotFound)?;
     dig.open()?;
+    dig.configure_endpoint()?;
 
     // print dev details
     let model = dig.getvalue("/par/ModelName")?;
@@ -189,16 +190,16 @@ fn main() -> Result<(), FELibReturn> {
 fn data_taking(acq_control: Arc<(Mutex<AcqControl>, Condvar)>) -> Result<(), FELibReturn> {
     let (control, cond) = &*acq_control;
     // configure endpoint
-    let mut ep_handle = 0;
-    let mut ep_folder_handle = 0;
-    felib_gethandle(
-        control.lock().unwrap().dig.handle,
-        "/endpoint/scope",
-        &mut ep_handle,
-    )?;
-    felib_getparenthandle(ep_handle, "", &mut ep_folder_handle)?;
-    felib_setvalue(ep_folder_handle, "/par/activeendpoint", "scope")?;
-    felib_setreaddataformat(ep_handle, EVENT_FORMAT)?;
+    // let mut ep_handle = 0;
+    // let mut ep_folder_handle = 0;
+    // felib_gethandle(
+    //     control.lock().unwrap().dig.handle,
+    //     "/endpoint/scope",
+    //     &mut ep_handle,
+    // )?;
+    // felib_getparenthandle(ep_handle, "", &mut ep_folder_handle)?;
+    // felib_setvalue(ep_folder_handle, "/par/activeendpoint", "scope")?;
+    // felib_setreaddataformat(ep_handle, EVENT_FORMAT)?;
 
     // signal main thread endpoint is configured
     {

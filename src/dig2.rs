@@ -6,6 +6,7 @@ include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
 use std::ffi::CString;
 
+use crate::felib::{gethandle, getparenthandle, setreaddataformat, setvalue};
 use crate::EventWrapper;
 use crate::FELibReturn;
 use confique::Config;
@@ -22,6 +23,8 @@ pub struct Dig2 {
     pub ep_folder_handle: u64,
     #[config(default = false)]
     pub is_connected: bool,
+    #[config(default = false)]
+    pub is_ep_configured: bool,
 }
 
 impl Dig2 {
@@ -89,21 +92,10 @@ impl Dig2 {
         }
     }
 
-    pub fn setvalue(&self, handle: u64, path: &str, value: &str) -> Result<(), FELibReturn> {
+    pub fn setvalue(&self, path: &str, value: &str) -> Result<(), FELibReturn> {
         let path = CString::new(path).unwrap();
         let value = CString::new(value).unwrap();
-        let res = unsafe { CAEN_FELib_SetValue(handle, path.as_ptr(), value.as_ptr()) };
-        let res = FELibReturn::from(res);
-        match res {
-            FELibReturn::Success => Ok(()),
-            _ => Err(res),
-        }
-    }
-
-    pub fn setvalue(handle: u64, path: &str, value: &str) -> Result<(), FELibReturn> {
-        let path = CString::new(path).unwrap();
-        let value = CString::new(value).unwrap();
-        let res = unsafe { CAEN_FELib_SetValue(handle, path.as_ptr(), value.as_ptr()) };
+        let res = unsafe { CAEN_FELib_SetValue(self.handle, path.as_ptr(), value.as_ptr()) };
         let res = FELibReturn::from(res);
         match res {
             FELibReturn::Success => Ok(()),
@@ -183,9 +175,17 @@ impl Dig2 {
     pub fn configure_endpoint(&mut self) -> Result<(), FELibReturn> {
         let mut ep_handle = 0;
         let mut ep_folder_handle = 0;
-        self.gethandle("/endpoint/scope", &mut ep_handle)?;
-        self.getparenthandle(self.ep_handle, "", &mut ep_folder_handle)?;
-        self.setvalue(self.ep_folder_handle, "/par/activeendpoint", "scope")?;
-        self.setreaddataformat(&self.endpoint)
+        gethandle(self.handle, "/endpoint/scope", &mut ep_handle)?;
+        getparenthandle(ep_handle, "", &mut ep_folder_handle)?;
+        setvalue(ep_folder_handle, "/par/activeendpoint", "scope")?;
+        match setreaddataformat(ep_handle, &self.endpoint) {
+            Ok(_) => {
+                self.ep_handle = ep_handle;
+                self.ep_folder_handle = ep_folder_handle;
+                self.is_ep_configured = true;
+                Ok(())
+            }
+            Err(e) => Err(e),
+        }
     }
 }

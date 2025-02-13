@@ -2,6 +2,8 @@
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
 
+use std::ffi::CString;
+
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
 #[repr(i32)]
@@ -115,6 +117,47 @@ pub fn felib_devicesdiscovery() -> Result<String, FELibReturn> {
     devices.retain(|&b| b != 0);
     match res {
         FELibReturn::Success => Ok(String::from_utf8(devices).unwrap()),
+        _ => Err(res),
+    }
+}
+
+pub fn gethandle(handle: u64, path: &str, path_handle: &mut u64) -> Result<(), FELibReturn> {
+    let path = CString::new(path).unwrap();
+    let res = unsafe { CAEN_FELib_GetHandle(handle, path.as_ptr(), path_handle) };
+    let res = FELibReturn::from(res);
+    match res {
+        FELibReturn::Success => Ok(()),
+        _ => Err(res),
+    }
+}
+
+pub fn getparenthandle(handle: u64, path: &str, path_handle: &mut u64) -> Result<(), FELibReturn> {
+    let path = CString::new(path).unwrap();
+    let res = unsafe { CAEN_FELib_GetParentHandle(handle, path.as_ptr(), path_handle) };
+    let res = FELibReturn::from(res);
+    match res {
+        FELibReturn::Success => Ok(()),
+        _ => Err(res),
+    }
+}
+
+pub fn setvalue(handle: u64, path: &str, value: &str) -> Result<(), FELibReturn> {
+    let path = CString::new(path).unwrap();
+    let value = CString::new(value).unwrap();
+    let res = unsafe { CAEN_FELib_SetValue(handle, path.as_ptr(), value.as_ptr()) };
+    let res = FELibReturn::from(res);
+    match res {
+        FELibReturn::Success => Ok(()),
+        _ => Err(res),
+    }
+}
+
+pub fn setreaddataformat(ep_handle: u64, format: &str) -> Result<(), FELibReturn> {
+    let format = CString::new(format).unwrap();
+    let res = unsafe { CAEN_FELib_SetReadDataFormat(ep_handle, format.as_ptr()) };
+    let res = FELibReturn::from(res);
+    match res {
+        FELibReturn::Success => Ok(()),
         _ => Err(res),
     }
 }
