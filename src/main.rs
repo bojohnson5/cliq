@@ -422,8 +422,7 @@ fn configure_sync(handle: u64, board_id: isize, num_boards: isize) -> Result<(),
         &clock_out_delay.to_string(),
     )?;
     felib_setvalue(handle, "/par/EnAutoDisarmAcq", "True")?;
-    felib_setvalue(handle, "/par/TrgOutMode", "RefClk")?;
-    felib_setvalue(handle, "/par/DACOutMode", "Square")?;
+    felib_setvalue(handle, "/par/TrgOutMode", "TrgIn")?;
 
     Ok(())
 }
