@@ -180,9 +180,9 @@ fn main() -> Result<(), FELibReturn> {
         println!("set pre trigger");
         felib_setvalue(dev_handle, "/par/AcqTriggerSource", "SwTrg | TestPulse")?;
         println!("set trig source");
-        felib_setvalue(dev_handle, "/par/TestPulsePeriod", "100000000.0")?;
+        felib_setvalue(dev_handle, "/par/TestPulsePeriod", "8333333.0")?;
         println!("set pulse period");
-        felib_setvalue(dev_handle, "/par/TestPulseWidth", "1000")?;
+        felib_setvalue(dev_handle, "/par/TestPulseWidth", "100")?;
         println!("set pulse width");
         felib_setvalue(dev_handle, "/ch/0..63/par/DCOffset", "50.0")?;
         println!("set dc offset");
