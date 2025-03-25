@@ -119,7 +119,7 @@ fn data_taking_thread(
     }
 
     // Data-taking loop.
-    let mut event = EventWrapper::new(num_ch, 1024);
+    let mut event = EventWrapper::new(num_ch, 4124);
     loop {
         let ret = felib_readdata(ep_handle, &mut event);
         match ret {
@@ -128,7 +128,7 @@ fn data_taking_thread(
                 // swap out the current one using std::mem::replace.
                 let board_event = BoardEvent {
                     board_id,
-                    event: std::mem::replace(&mut event, EventWrapper::new(num_ch, 1024)),
+                    event: std::mem::replace(&mut event, EventWrapper::new(num_ch, 4124)),
                 };
                 tx.send(board_event).expect("Failed to send event");
             }
@@ -173,12 +173,19 @@ fn main() -> Result<(), FELibReturn> {
     print!("Configuring boards...\t");
     for &(_, dev_handle) in &boards {
         felib_setvalue(dev_handle, "/ch/0..63/par/ChEnable", "true")?;
-        felib_setvalue(dev_handle, "/par/RecordLengthS", "1024")?;
+        println!("enabled channels");
+        felib_setvalue(dev_handle, "/par/RecordLengthS", "4124")?;
+        println!("set record length");
         felib_setvalue(dev_handle, "/par/PreTriggerS", "100")?;
+        println!("set pre trigger");
         felib_setvalue(dev_handle, "/par/AcqTriggerSource", "SwTrg | TestPulse")?;
+        println!("set trig source");
         felib_setvalue(dev_handle, "/par/TestPulsePeriod", "100000000.0")?;
+        println!("set pulse period");
         felib_setvalue(dev_handle, "/par/TestPulseWidth", "1000")?;
+        println!("set pulse width");
         felib_setvalue(dev_handle, "/ch/0..63/par/DCOffset", "50.0")?;
+        println!("set dc offset");
     }
     println!("done.");
 
@@ -279,7 +286,7 @@ fn main() -> Result<(), FELibReturn> {
     let boards_for_input = boards.clone();
 
     // Spawn a dedicated thread to listen for user input.
-    let _input_handle = thread::spawn(move || loop {
+    let input_handle = thread::spawn(move || loop {
         println!("#################################");
         println!("Commands supported:");
         println!("\t[t]\tSend manual trigger to all boards");
