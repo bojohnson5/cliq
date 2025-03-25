@@ -2,7 +2,7 @@ use core::str;
 use crossterm::terminal;
 use rust_daq::*;
 use std::{
-    io::{stdin, Read},
+    io::{stdin, stdout, Read, Write},
     sync::{mpsc, Arc, Condvar, Mutex},
     thread,
     time::{Duration, Instant},
@@ -149,7 +149,7 @@ fn main() -> Result<(), FELibReturn> {
     // List of board connection strings. Add as many as needed.
     let board_urls = vec![
         "dig2://caendgtz-usb-25380",
-        "dig2://caendgtz-usb-25381",
+        "dig2://caendgtz-usb-25379",
         // e.g., "dig2://caendgtz-usb-25382",
     ];
 
@@ -253,31 +253,33 @@ fn main() -> Result<(), FELibReturn> {
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
             }
             if last_print.elapsed() >= print_interval {
-                println!(
-                    "\nGlobal stats: Elapsed time: {} s\tEvents: {}\tData rate: {:.3} MB/s",
+                print!(
+                    "\x1b[1K\rGlobal stats: Elapsed time: {} s\tEvents: {}\tData rate: {:.3} MB/s",
                     stats.t_begin.elapsed().as_secs(),
                     stats.n_events,
                     (stats.total_size as f64)
                         / stats.t_begin.elapsed().as_secs_f64()
                         / (1024.0 * 1024.0)
                 );
+                stdout().flush().expect("couldn't flush stdout");
                 last_print = Instant::now();
             }
         }
         // Final stats printout.
-        println!(
-            "\nFinal global stats: Total time: {} s\tTotal events: {}\tAverage rate: {:.3} MB/s",
+        print!(
+            "\x1b[1K\rFinal global stats: Total time: {} s\tTotal events: {}\tAverage rate: {:.3} MB/s",
             stats.t_begin.elapsed().as_secs(),
             stats.n_events,
             (stats.total_size as f64) / stats.t_begin.elapsed().as_secs_f64() / (1024.0 * 1024.0)
         );
+        stdout().flush().expect("couldn't flush stdout");
     });
 
     // Clone board handles for the user input thread.
     let boards_for_input = boards.clone();
 
     // Spawn a dedicated thread to listen for user input.
-    let input_handle = thread::spawn(move || loop {
+    let _input_handle = thread::spawn(move || loop {
         println!("#################################");
         println!("Commands supported:");
         println!("\t[t]\tSend manual trigger to all boards");
