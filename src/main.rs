@@ -158,9 +158,9 @@ fn main() -> Result<(), FELibReturn> {
     let mut boards = Vec::new();
     for (i, url) in board_urls.iter().enumerate() {
         let dev_handle = felib_open(url)?;
-        println!("\nBoard {} details:", i + 1);
+        println!("\nBoard {} details:", i);
         print_dig_details(dev_handle)?;
-        boards.push((i + 1, dev_handle));
+        boards.push((i, dev_handle));
     }
 
     // Reset all boards.
@@ -359,7 +359,7 @@ fn get_run_delay(board_id: isize, num_boards: isize) -> isize {
     let first_board = board_id == 0;
     let board_id_from_last = num_boards - board_id - 1;
 
-    let mut run_delay_clk = 2 * board_id_from_last as isize;
+    let mut run_delay_clk = 2 * board_id_from_last;
 
     if first_board {
         run_delay_clk += 4;
