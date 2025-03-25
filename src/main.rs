@@ -286,47 +286,53 @@ fn main() -> Result<(), FELibReturn> {
     let boards_for_input = boards.clone();
 
     // Spawn a dedicated thread to listen for user input.
-    let input_handle = thread::spawn(move || loop {
+    let (tx_user, rx_user) = mpsc::channel();
+    let _input_handle = thread::spawn(move || {
         println!("#################################");
         println!("Commands supported:");
         println!("\t[t]\tSend manual trigger to all boards");
         println!("\t[s]\tStop acquisition");
         println!("#################################");
-        if let Ok(c) = getch() {
-            if c[0] == b't' {
-                for &(_, dev_handle) in &boards_for_input {
-                    felib_sendcommand(dev_handle, "/cmd/sendswtrigger").ok();
-                }
-            } else if c[0] == b's' {
-                println!("User requested stop. Stopping acquisition...");
-                for &(_, dev_handle) in &boards_for_input {
-                    felib_sendcommand(dev_handle, "/cmd/disarmacquisition").ok();
-                }
-                break;
+        match getch() {
+            Ok(c) => tx_user.send(c),
+            Err(_) => {
+                print!("error getting input");
+                Ok(())
             }
-        } else {
-            println!("Error reading input.");
         }
     });
 
-    // Main thread waits for a timeout duration.
+    let mut quit = false;
     let timeout_duration = Duration::from_secs(10);
-    let start_time = Instant::now();
-    while start_time.elapsed() < timeout_duration {
-        thread::sleep(Duration::from_millis(100));
+    while !quit {
+        match rx_user.recv_timeout(timeout_duration) {
+            Ok(c) => match &c {
+                b"s" => quit = true,
+                b"t" => {
+                    for &(_, dev_handle) in &boards_for_input {
+                        felib_sendcommand(dev_handle, "/cmd/sendswtrigger")?;
+                    }
+                }
+                _ => (),
+            },
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                terminal::disable_raw_mode().map_err(|_| FELibReturn::Generic)?;
+                println!("\nEnding run...");
+                quit = true;
+            }
+            _ => (),
+        }
     }
-    println!("Timeout reached. Stopping acquisition...");
 
     // Stop acquisition on all boards.
     for &(_, dev_handle) in &boards {
-        felib_sendcommand(dev_handle, "/cmd/disarmacquisition").ok();
+        felib_sendcommand(dev_handle, "/cmd/disarmacquisition")?;
     }
 
     // Close the tx channel so that the event processing thread can exit.
     drop(tx);
 
     // Wait for the input, event processing, and board threads to finish.
-    input_handle.join().expect("User input thread panicked");
     event_processing_handle
         .join()
         .expect("Event processing thread panicked");
