@@ -100,6 +100,7 @@ fn data_taking_thread(
     felib_getparenthandle(ep_handle, "", &mut ep_folder_handle)?;
     felib_setvalue(ep_folder_handle, "/par/activeendpoint", "scope")?;
     felib_setreaddataformat(ep_handle, EVENT_FORMAT)?;
+    felib_sendcommand(dev_handle, "/cmd/armacquisition")?;
 
     // Signal that this board's endpoint is configured.
     {
@@ -172,20 +173,14 @@ fn main() -> Result<(), FELibReturn> {
     // Configure all boards.
     print!("Configuring boards...\t");
     for &(_, dev_handle) in &boards {
-        felib_setvalue(dev_handle, "/ch/0..63/par/ChEnable", "true")?;
-        println!("enabled channels");
-        felib_setvalue(dev_handle, "/par/RecordLengthS", "4124")?;
-        println!("set record length");
-        felib_setvalue(dev_handle, "/par/PreTriggerS", "100")?;
-        println!("set pre trigger");
-        felib_setvalue(dev_handle, "/par/AcqTriggerSource", "SwTrg | TestPulse")?;
-        println!("set trig source");
-        felib_setvalue(dev_handle, "/par/TestPulsePeriod", "8333333.0")?;
-        println!("set pulse period");
-        felib_setvalue(dev_handle, "/par/TestPulseWidth", "100")?;
-        println!("set pulse width");
-        felib_setvalue(dev_handle, "/ch/0..63/par/DCOffset", "50.0")?;
-        println!("set dc offset");
+        configure_board(dev_handle)?;
+    }
+    println!("done.");
+
+    // Configure sync settings
+    print!("Configuring sync...\t");
+    for &(i, dev_handle) in &boards {
+        configure_sync(dev_handle, i, board_urls.len())?;
     }
     println!("done.");
 
@@ -234,12 +229,9 @@ fn main() -> Result<(), FELibReturn> {
         cvar.notify_all();
     }
 
-    // Begin acquisition on all boards.
-    print!("Starting acquisitions...\t");
-    for &(_, dev_handle) in &boards {
-        felib_sendcommand(dev_handle, "/cmd/armacquisition")?;
-        felib_sendcommand(dev_handle, "/cmd/swstartacquisition")?;
-    }
+    // Begin run acquisition.
+    print!("Starting acquisition on primary board...\t");
+    felib_sendcommand(boards[0].1, "/cmd/swstartacquisition")?;
     println!("done.");
 
     // Spawn a dedicated thread to process incoming events and print global stats.
@@ -261,7 +253,7 @@ fn main() -> Result<(), FELibReturn> {
             }
             if last_print.elapsed() >= print_interval {
                 print!(
-                    "\x1b[1K\rGlobal stats: Elapsed time: {} s\tEvents: {}\tData rate: {:.3} MB/s",
+                    "\x1b[1K\rElapsed time: {} s\tEvents: {}\tData rate: {:.3} MB/s",
                     stats.t_begin.elapsed().as_secs(),
                     stats.n_events,
                     (stats.total_size as f64)
@@ -274,7 +266,7 @@ fn main() -> Result<(), FELibReturn> {
         }
         // Final stats printout.
         print!(
-            "\x1b[1K\rFinal global stats: Total time: {} s\tTotal events: {}\tAverage rate: {:.3} MB/s",
+            "\x1b[1K\rTotal time: {} s\tTotal events: {}\tAverage rate: {:.3} MB/s",
             stats.t_begin.elapsed().as_secs(),
             stats.n_events,
             (stats.total_size as f64) / stats.t_begin.elapsed().as_secs_f64() / (1024.0 * 1024.0)
@@ -345,7 +337,93 @@ fn main() -> Result<(), FELibReturn> {
         felib_close(dev_handle)?;
     }
 
-    println!("TTFN!");
+    println!("\nTTFN!");
+
+    Ok(())
+}
+
+fn get_clock_out_delay(board_id: usize, num_boards: usize) -> isize {
+    let first_board = board_id == 0;
+    let last_board = board_id == num_boards - 1;
+
+    if last_board {
+        0
+    } else if first_board {
+        -2148
+    } else {
+        -3111
+    }
+}
+
+fn get_run_delay(board_id: usize, num_boards: usize) -> isize {
+    let first_board = board_id == 0;
+    let board_id_from_last = num_boards - board_id - 1;
+
+    let mut run_delay_clk = 2 * board_id_from_last as isize;
+
+    if first_board {
+        run_delay_clk += 4;
+    }
+
+    run_delay_clk * 8
+}
+
+fn configure_board(handle: u64) -> Result<(), FELibReturn> {
+    felib_setvalue(handle, "/ch/0..63/par/ChEnable", "true")?;
+    felib_setvalue(handle, "/par/RecordLengthS", "4124")?;
+    felib_setvalue(handle, "/par/PreTriggerS", "100")?;
+    felib_setvalue(handle, "/par/AcqTriggerSource", "SwTrg | TestPulse")?;
+    felib_setvalue(handle, "/par/TestPulsePeriod", "8333333.0")?;
+    felib_setvalue(handle, "/par/TestPulseWidth", "128")?;
+    felib_setvalue(handle, "/ch/0..63/par/DCOffset", "50.0")?;
+    felib_setvalue(handle, "/par/TestPulseLowLevel", "0")?;
+    felib_setvalue(handle, "/par/TestPulseHighLevel", "10000")?;
+
+    Ok(())
+}
+
+fn configure_sync(handle: u64, board_id: usize, num_boards: usize) -> Result<(), FELibReturn> {
+    let first_board = board_id == 0;
+    let last_board = board_id == num_boards - 1;
+
+    let run_delay = get_run_delay(board_id, num_boards);
+    let clock_out_delay = get_clock_out_delay(board_id, num_boards);
+
+    felib_setvalue(
+        handle,
+        "/par/ClockSource",
+        if first_board { "Internal" } else { "FPClkIn" },
+    )?;
+    felib_setvalue(
+        handle,
+        "/par/SyncOutMode",
+        if last_board {
+            "Disabled"
+        } else if first_board {
+            "Run"
+        } else {
+            "SyncIn"
+        },
+    )?;
+    felib_setvalue(
+        handle,
+        "/par/StartSource",
+        if first_board { "SWcmd" } else { "EncodedClkIn" },
+    )?;
+    felib_setvalue(
+        handle,
+        "/par/EnClockOutFP",
+        if last_board { "False" } else { "True" },
+    )?;
+    felib_setvalue(handle, "/par/RunDelay", &run_delay.to_string())?;
+    felib_setvalue(
+        handle,
+        "/par/VolatileClockOutDelay",
+        &clock_out_delay.to_string(),
+    )?;
+    felib_setvalue(handle, "/par/EnAutoDisarmAcq", "True")?;
+    felib_setvalue(handle, "/par/TrgOutMode", "RefClk")?;
+    felib_setvalue(handle, "/par/DACOutMode", "Square")?;
 
     Ok(())
 }
