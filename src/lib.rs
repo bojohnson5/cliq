@@ -60,6 +60,7 @@ pub struct AcqControl {
 }
 
 #[repr(C)]
+#[derive(Debug)]
 pub struct CEvent {
     pub timestamp: u64,
     pub timestamp_us: f64,
@@ -78,6 +79,7 @@ pub struct CEvent {
 /// The inner `c_event` field can be passed to the C function, while the owned
 /// buffers are automatically dropped when the wrapper goes out of scope.
 #[allow(dead_code)]
+#[derive(Debug)]
 pub struct EventWrapper {
     pub c_event: CEvent,
 
@@ -90,6 +92,8 @@ pub struct EventWrapper {
     n_samples: Box<[usize]>,
     n_allocated_samples: Box<[usize]>,
 }
+
+unsafe impl Send for EventWrapper {}
 
 impl EventWrapper {
     /// Create a new EventWrapper.
