@@ -180,7 +180,7 @@ fn main() -> Result<(), FELibReturn> {
     // Configure sync settings
     print!("Configuring sync...\t");
     for &(i, dev_handle) in &boards {
-        configure_sync(dev_handle, i, board_urls.len())?;
+        configure_sync(dev_handle, i as isize, board_urls.len() as isize)?;
     }
     println!("done.");
 
@@ -342,7 +342,7 @@ fn main() -> Result<(), FELibReturn> {
     Ok(())
 }
 
-fn get_clock_out_delay(board_id: usize, num_boards: usize) -> isize {
+fn get_clock_out_delay(board_id: isize, num_boards: isize) -> isize {
     let first_board = board_id == 0;
     let last_board = board_id == num_boards - 1;
 
@@ -355,7 +355,7 @@ fn get_clock_out_delay(board_id: usize, num_boards: usize) -> isize {
     }
 }
 
-fn get_run_delay(board_id: usize, num_boards: usize) -> isize {
+fn get_run_delay(board_id: isize, num_boards: isize) -> isize {
     let first_board = board_id == 0;
     let board_id_from_last = num_boards - board_id - 1;
 
@@ -382,7 +382,7 @@ fn configure_board(handle: u64) -> Result<(), FELibReturn> {
     Ok(())
 }
 
-fn configure_sync(handle: u64, board_id: usize, num_boards: usize) -> Result<(), FELibReturn> {
+fn configure_sync(handle: u64, board_id: isize, num_boards: isize) -> Result<(), FELibReturn> {
     let first_board = board_id == 0;
     let last_board = board_id == num_boards - 1;
 
