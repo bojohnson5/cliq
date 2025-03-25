@@ -387,13 +387,16 @@ fn configure_sync(handle: u64, board_id: isize, num_boards: isize) -> Result<(),
     let last_board = board_id == num_boards - 1;
 
     let run_delay = get_run_delay(board_id, num_boards);
+    println!("run delay: {}", run_delay);
     let clock_out_delay = get_clock_out_delay(board_id, num_boards);
+    println!("clock delay: {}", clock_out_delay);
 
     felib_setvalue(
         handle,
         "/par/ClockSource",
         if first_board { "Internal" } else { "FPClkIn" },
     )?;
+    println!("set clock source");
     felib_setvalue(
         handle,
         "/par/SyncOutMode",
@@ -405,24 +408,31 @@ fn configure_sync(handle: u64, board_id: isize, num_boards: isize) -> Result<(),
             "SyncIn"
         },
     )?;
+    println!("set sycn out");
     felib_setvalue(
         handle,
         "/par/StartSource",
         if first_board { "SWcmd" } else { "EncodedClkIn" },
     )?;
+    println!("set start source");
     felib_setvalue(
         handle,
         "/par/EnClockOutFP",
         if last_board { "False" } else { "True" },
     )?;
+    println!("set clock out");
     felib_setvalue(handle, "/par/RunDelay", &run_delay.to_string())?;
+    println!("set run delay");
     felib_setvalue(
         handle,
         "/par/VolatileClockOutDelay",
         &clock_out_delay.to_string(),
     )?;
+    println!("set clock out delay");
     felib_setvalue(handle, "/par/EnAutoDisarmAcq", "True")?;
+    println!("set auto disarm");
     felib_setvalue(handle, "/par/TrgOutMode", "TrgIn")?;
+    println!("set trig out mode");
 
     Ok(())
 }
