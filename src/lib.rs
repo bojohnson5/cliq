@@ -6,6 +6,7 @@ include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
 mod config;
 pub use config::{ChannelConfig, Conf, DCOffsetConfig};
+use ndarray::{s, Array2};
 
 use std::ffi::CString;
 
@@ -86,8 +87,8 @@ pub struct CEvent {
 pub struct EventWrapper {
     pub c_event: CEvent,
 
-    // Owned memory: the actual waveform buffers.
-    waveform_buffers: Vec<Box<[u16]>>,
+    // The waveform data is stored as a 2D contiguous array.
+    waveform_data: Array2<u16>,
     // Owned slice of waveform pointers. We need to keep this alive so that
     // `c_event.waveform` (a raw pointer into it) remains valid.
     waveform_ptrs: Box<[*mut u16]>,
@@ -106,31 +107,29 @@ impl EventWrapper {
     /// * `n_channels` - Number of waveforms/channels.
     /// * `waveform_len` - Number of samples per waveform.
     pub fn new(n_channels: usize, waveform_len: usize) -> Self {
-        // Allocate the individual waveform buffers.
-        let mut waveform_buffers = Vec::with_capacity(n_channels);
+        // Create a 2D array for waveform data with dimensions (n_channels, waveform_len).
+        let mut waveform_data = Array2::<u16>::zeros((n_channels, waveform_len));
+
+        // Build a vector of pointers—one per row.
         let mut waveform_ptrs_vec = Vec::with_capacity(n_channels);
-        for _ in 0..n_channels {
-            // Create a waveform buffer with the desired length.
-            let mut buffer = vec![0u16; waveform_len].into_boxed_slice();
-            // Get a mutable pointer to the buffer’s data.
-            let ptr = buffer.as_mut_ptr();
-            waveform_ptrs_vec.push(ptr);
-            waveform_buffers.push(buffer);
+        for i in 0..n_channels {
+            // Get a mutable pointer to the row i.
+            let row_ptr = waveform_data.as_mut_ptr().wrapping_add(i * waveform_len);
+            waveform_ptrs_vec.push(row_ptr);
         }
-        // Box the slice of waveform pointers. This memory is owned by our wrapper.
         let mut waveform_ptrs = waveform_ptrs_vec.into_boxed_slice();
 
         // Allocate the arrays for n_samples and n_allocated_samples.
+        // Here we assume that each channel is allocated with `waveform_len` samples.
         let mut n_samples = vec![0usize; n_channels].into_boxed_slice();
-        let mut n_allocated_samples = vec![0usize; n_channels].into_boxed_slice();
+        let mut n_allocated_samples = vec![waveform_len; n_channels].into_boxed_slice();
 
-        // IMPORTANT: Use as_mut_ptr() here so that the returned pointer
-        // is actually mutable.
+        // Get mutable raw pointers to pass to the C API.
         let waveform_ptr = waveform_ptrs.as_mut_ptr();
         let n_samples_ptr = n_samples.as_mut_ptr();
         let n_allocated_samples_ptr = n_allocated_samples.as_mut_ptr();
 
-        // Build the C-compatible event. We obtain raw pointers from the boxes.
+        // Build the C-compatible event.
         let c_event = CEvent {
             timestamp: 0,
             timestamp_us: 0.0,
@@ -144,10 +143,10 @@ impl EventWrapper {
 
         Self {
             c_event,
-            waveform_buffers,
+            waveform_data,
+            waveform_ptrs,
             n_samples,
             n_allocated_samples,
-            waveform_ptrs,
         }
     }
 }
