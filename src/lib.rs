@@ -4,6 +4,9 @@
 
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
+mod config;
+pub use config::{ChannelConfig, Conf, DCOffsetConfig};
+
 use std::ffi::CString;
 
 #[repr(i32)]

@@ -4,7 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+confique = { version = "0.3.0", features = ["toml"] }
 crossterm = "0.28.1"
+serde = { version = "1.0.219", features = ["derive"] }
 
 [build-dependencies]
 bindgen = "0.71.0"

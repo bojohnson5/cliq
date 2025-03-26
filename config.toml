@@ -1,0 +1,32 @@
+[board_settings]
+# en_chans can be either true for all channels or a list
+# of channels to enable
+# en_chans = [1, 2, 3, 4, 50]
+en_chans = true
+
+# record_len is the waveform length in ns
+record_len = 33000
+
+# pre_trig_len is pre-trigger length in ns
+pre_trig_len = 100
+trig_source = "SwTrg"
+
+# dc_offset can be a single number for each channel
+# or a map for each channel
+# [dc_offset]
+# 1 = 20.0
+# 2 = 30.0
+# 50 = 50.0
+dc_offset = 50.0
+
+[sync_settings]
+primary_clock_src = "Internal"
+primary_sync_out = "Run"
+primary_start_source = "SWcmd"
+primary_clock_out_fp = "True"
+secondary_clock_src = "FPClkIn"
+secondary_sync_out = "Disabled"
+secondary_start_source = "EncodedClkIn"
+secondary_clock_out_fp = "False"
+auto_disarm = "True"
+trig_out = "TrgIn"

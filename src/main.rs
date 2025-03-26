@@ -1,3 +1,4 @@
+use confique::Config;
 use core::str;
 use crossterm::terminal;
 use rust_daq::*;
@@ -146,13 +147,10 @@ fn data_taking_thread(
 
 fn main() -> Result<(), FELibReturn> {
     let num_chan = 64;
+    let config = Conf::from_file("config.toml").map_err(|_| FELibReturn::InvalidParam)?;
 
     // List of board connection strings. Add as many as needed.
-    let board_urls = vec![
-        "dig2://caendgtz-usb-25380",
-        "dig2://caendgtz-usb-25379",
-        // e.g., "dig2://caendgtz-usb-25382",
-    ];
+    let board_urls = vec!["dig2://caendgtz-usb-25380", "dig2://caendgtz-usb-25379"];
 
     // Open boards and store their handles along with an assigned board ID.
     let mut boards = Vec::new();
@@ -173,14 +171,14 @@ fn main() -> Result<(), FELibReturn> {
     // Configure all boards.
     print!("Configuring boards...\t");
     for &(_, dev_handle) in &boards {
-        configure_board(dev_handle)?;
+        configure_board(dev_handle, &config)?;
     }
     println!("done.");
 
     // Configure sync settings
     print!("Configuring sync...\t");
     for &(i, dev_handle) in &boards {
-        configure_sync(dev_handle, i as isize, board_urls.len() as isize)?;
+        configure_sync(dev_handle, i as isize, board_urls.len() as isize, &config)?;
     }
     println!("done.");
 
@@ -274,9 +272,6 @@ fn main() -> Result<(), FELibReturn> {
         stdout().flush().expect("couldn't flush stdout");
     });
 
-    // Clone board handles for the user input thread.
-    let boards_for_input = boards.clone();
-
     // Spawn a dedicated thread to listen for user input.
     let (tx_user, rx_user) = mpsc::channel();
     let _input_handle = thread::spawn(move || {
@@ -301,7 +296,7 @@ fn main() -> Result<(), FELibReturn> {
             Ok(c) => match &c {
                 b"s" => quit = true,
                 b"t" => {
-                    for &(_, dev_handle) in &boards_for_input {
+                    for &(_, dev_handle) in &boards {
                         felib_sendcommand(dev_handle, "/cmd/sendswtrigger")?;
                     }
                 }
@@ -368,71 +363,112 @@ fn get_run_delay(board_id: isize, num_boards: isize) -> isize {
     run_delay_clk * 8
 }
 
-fn configure_board(handle: u64) -> Result<(), FELibReturn> {
-    felib_setvalue(handle, "/ch/0..63/par/ChEnable", "true")?;
-    felib_setvalue(handle, "/par/RecordLengthS", "4124")?;
-    felib_setvalue(handle, "/par/PreTriggerS", "100")?;
-    felib_setvalue(handle, "/par/AcqTriggerSource", "SwTrg | TestPulse")?;
+fn configure_board(handle: u64, config: &Conf) -> Result<(), FELibReturn> {
+    match config.board_settings.en_chans {
+        ChannelConfig::All => {
+            felib_setvalue(handle, "/ch/0..63/par/ChEnable", "true")?;
+        }
+        ChannelConfig::List(ref channels) => {
+            for channel in channels {
+                let path = format!("/ch/{}/par/ChEnable", channel);
+                felib_setvalue(handle, &path, "true")?;
+            }
+        }
+    }
+    match config.board_settings.dc_offset {
+        DCOffsetConfig::Global(offset) => {
+            felib_setvalue(handle, "/ch/0..63/par/DCOffset", &offset.to_string())?;
+        }
+        DCOffsetConfig::PerChannel(ref map) => {
+            for (chan, offset) in map {
+                let path = format!("/ch/{}/par/DCOffset", chan);
+
+                felib_setvalue(handle, &path, &offset.to_string())?;
+            }
+        }
+    }
+    felib_setvalue(
+        handle,
+        "/par/RecordLengthT",
+        &config.board_settings.record_len.to_string(),
+    )?;
+    felib_setvalue(
+        handle,
+        "/par/PreTriggerT",
+        &config.board_settings.pre_trig_len.to_string(),
+    )?;
+    felib_setvalue(
+        handle,
+        "/par/AcqTriggerSource",
+        &config.board_settings.trig_source,
+    )?;
     felib_setvalue(handle, "/par/TestPulsePeriod", "8333333.0")?;
     felib_setvalue(handle, "/par/TestPulseWidth", "128")?;
-    felib_setvalue(handle, "/ch/0..63/par/DCOffset", "50.0")?;
     felib_setvalue(handle, "/par/TestPulseLowLevel", "0")?;
     felib_setvalue(handle, "/par/TestPulseHighLevel", "10000")?;
 
     Ok(())
 }
 
-fn configure_sync(handle: u64, board_id: isize, num_boards: isize) -> Result<(), FELibReturn> {
+fn configure_sync(
+    handle: u64,
+    board_id: isize,
+    num_boards: isize,
+    config: &Conf,
+) -> Result<(), FELibReturn> {
     let first_board = board_id == 0;
-    let last_board = board_id == num_boards - 1;
-
-    let run_delay = get_run_delay(board_id, num_boards);
-    println!("run delay: {}", run_delay);
-    let clock_out_delay = get_clock_out_delay(board_id, num_boards);
-    println!("clock delay: {}", clock_out_delay);
 
     felib_setvalue(
         handle,
         "/par/ClockSource",
-        if first_board { "Internal" } else { "FPClkIn" },
+        if first_board {
+            &config.sync_settings.primary_clock_src
+        } else {
+            &config.sync_settings.secondary_clock_src
+        },
     )?;
-    println!("set clock source");
     felib_setvalue(
         handle,
         "/par/SyncOutMode",
-        if last_board {
-            "Disabled"
-        } else if first_board {
-            "Run"
+        if first_board {
+            &config.sync_settings.primary_sync_out
         } else {
-            "SyncIn"
+            &config.sync_settings.secondary_sync_out
         },
     )?;
-    println!("set sycn out");
     felib_setvalue(
         handle,
         "/par/StartSource",
-        if first_board { "SWcmd" } else { "EncodedClkIn" },
+        if first_board {
+            &config.sync_settings.primary_start_source
+        } else {
+            &config.sync_settings.secondary_start_source
+        },
     )?;
-    println!("set start source");
     felib_setvalue(
         handle,
         "/par/EnClockOutFP",
-        if last_board { "False" } else { "True" },
+        if first_board {
+            &config.sync_settings.primary_clock_out_fp
+        } else {
+            &config.sync_settings.secondary_clock_out_fp
+        },
     )?;
-    println!("set clock out");
+    felib_setvalue(
+        handle,
+        "/par/EnAutoDisarmAcq",
+        &config.sync_settings.auto_disarm,
+    )?;
+    felib_setvalue(handle, "/par/TrgOutMode", &config.sync_settings.trig_out)?;
+
+    let run_delay = get_run_delay(board_id, num_boards);
+    let clock_out_delay = get_clock_out_delay(board_id, num_boards);
     felib_setvalue(handle, "/par/RunDelay", &run_delay.to_string())?;
-    println!("set run delay");
     felib_setvalue(
         handle,
         "/par/VolatileClockOutDelay",
         &clock_out_delay.to_string(),
     )?;
-    println!("set clock out delay");
-    felib_setvalue(handle, "/par/EnAutoDisarmAcq", "True")?;
-    println!("set auto disarm");
-    felib_setvalue(handle, "/par/TrgOutMode", "TrgIn")?;
-    println!("set trig out mode");
 
     Ok(())
 }
