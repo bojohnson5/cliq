@@ -9,7 +9,7 @@ record_len = 33000
 
 # pre_trig_len is pre-trigger length in ns
 pre_trig_len = 100
-trig_source = "SwTrg" # TrgIn is another option
+trig_source = "SwTrg | TestPulse" # TrgIn is another option
 
 # dc_offset can be a single number for each channel
 # or a map for each channel
