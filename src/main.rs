@@ -123,7 +123,7 @@ fn data_taking_thread(
 
     // Data-taking loop.
     let num_ch = match config.board_settings.en_chans {
-        ChannelConfig::All => 64,
+        ChannelConfig::All(_) => 64,
         ChannelConfig::List(chs) => chs.len(),
     };
     let waveform_len = config.board_settings.record_len;
@@ -372,7 +372,7 @@ fn get_run_delay(board_id: isize, num_boards: isize) -> isize {
 
 fn configure_board(handle: u64, config: &Conf) -> Result<(), FELibReturn> {
     match config.board_settings.en_chans {
-        ChannelConfig::All => {
+        ChannelConfig::All(_) => {
             felib_setvalue(handle, "/ch/0..63/par/ChEnable", "true")?;
         }
         ChannelConfig::List(ref channels) => {

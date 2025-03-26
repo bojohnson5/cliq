@@ -36,7 +36,7 @@ pub struct SyncSettings {
 #[derive(Deserialize, Clone, Debug)]
 #[serde(untagged)]
 pub enum ChannelConfig {
-    All,
+    All(bool),
     List(Vec<u8>),
 }
 
