@@ -82,6 +82,7 @@ pub struct CEvent {
 ///
 /// The inner `c_event` field can be passed to the C function, while the owned
 /// buffers are automatically dropped when the wrapper goes out of scope.
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct EventWrapper {
     pub c_event: CEvent,
@@ -113,7 +114,7 @@ impl EventWrapper {
         let mut waveform_ptrs_vec = Vec::with_capacity(n_channels);
         for i in 0..n_channels {
             // Get a mutable pointer to the row i.
-            let row_ptr = waveform_data.slice_mut(s![i, ..]).as_mut_ptr();
+            let row_ptr = waveform_data.as_mut_ptr().wrapping_add(i * waveform_len);
             waveform_ptrs_vec.push(row_ptr);
         }
         let mut waveform_ptrs = waveform_ptrs_vec.into_boxed_slice();

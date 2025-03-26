@@ -1,7 +1,6 @@
 use confique::Config;
 use core::str;
 use crossterm::terminal;
-use hdf5::File;
 use rust_daq::*;
 use std::{
     io::{stdin, stdout, Read, Write},
