@@ -7,6 +7,8 @@ edition = "2021"
 confique = { version = "0.3.0", features = ["toml"] }
 crossterm = "0.28.1"
 serde = { version = "1.0.219", features = ["derive"] }
+hdf5 = { package = "hdf5-metno", version = "0.10.0" }
+ndarray = "0.16.1"
 
 [build-dependencies]
 bindgen = "0.71.0"

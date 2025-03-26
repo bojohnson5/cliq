@@ -1,6 +1,7 @@
 use confique::Config;
 use core::str;
 use crossterm::terminal;
+use hdf5::File;
 use rust_daq::*;
 use std::{
     io::{stdin, stdout, Read, Write},
@@ -89,7 +90,7 @@ fn print_dig_details(handle: u64) -> Result<(), FELibReturn> {
 fn data_taking_thread(
     board_id: usize,
     dev_handle: u64,
-    num_ch: usize,
+    config: Conf,
     tx: mpsc::Sender<BoardEvent>,
     acq_start: Arc<(Mutex<bool>, Condvar)>,
     endpoint_configured: Arc<(Mutex<u32>, Condvar)>,
@@ -121,7 +122,12 @@ fn data_taking_thread(
     }
 
     // Data-taking loop.
-    let mut event = EventWrapper::new(num_ch, 4124);
+    let num_ch = match config.board_settings.en_chans {
+        ChannelConfig::All => 64,
+        ChannelConfig::List(chs) => chs.len(),
+    };
+    let waveform_len = config.board_settings.record_len;
+    let mut event = EventWrapper::new(num_ch, waveform_len);
     loop {
         let ret = felib_readdata(ep_handle, &mut event);
         match ret {
@@ -130,7 +136,7 @@ fn data_taking_thread(
                 // swap out the current one using std::mem::replace.
                 let board_event = BoardEvent {
                     board_id,
-                    event: std::mem::replace(&mut event, EventWrapper::new(num_ch, 4124)),
+                    event: std::mem::replace(&mut event, EventWrapper::new(num_ch, waveform_len)),
                 };
                 tx.send(board_event).expect("Failed to send event");
             }
@@ -193,6 +199,7 @@ fn main() -> Result<(), FELibReturn> {
     // Spawn a data-taking thread for each board.
     let mut board_threads = Vec::new();
     for &(board_id, dev_handle) in &boards {
+        let config_clone = config.clone();
         let acq_start_clone = Arc::clone(&acq_start);
         let endpoint_configured_clone = Arc::clone(&endpoint_configured);
         let tx_clone = tx.clone();
@@ -200,7 +207,7 @@ fn main() -> Result<(), FELibReturn> {
             data_taking_thread(
                 board_id,
                 dev_handle,
-                num_chan,
+                config_clone,
                 tx_clone,
                 acq_start_clone,
                 endpoint_configured_clone,
