@@ -124,9 +124,9 @@ impl EventWrapper {
         let n_allocated_samples = vec![waveform_len; n_channels].into_boxed_slice();
 
         // Get mutable raw pointers to pass to the C API.
-        let waveform_ptr = waveform_ptrs.as_mut_ptr();
-        let n_samples_ptr = n_samples.as_mut_ptr();
-        let n_allocated_samples_ptr = n_allocated_samples.as_mut_ptr();
+        let mut waveform_ptr = waveform_ptrs.as_mut_ptr();
+        let mut n_samples_ptr = n_samples.as_mut_ptr();
+        let mut n_allocated_samples_ptr = n_allocated_samples.as_mut_ptr();
 
         // Build the C-compatible event.
         let c_event = CEvent {
