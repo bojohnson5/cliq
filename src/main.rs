@@ -243,9 +243,8 @@ fn main() -> Result<(), FELibReturn> {
     println!("done.");
 
     // Spawn a dedicated thread to process incoming events and print global stats.
-    let num_boards = board_urls.len();
     let event_processing_handle = thread::spawn(move || {
-        event_processing(rx, num_boards);
+        event_processing(rx);
     });
 
     // Spawn a dedicated thread to listen for user input.
@@ -452,39 +451,21 @@ fn configure_sync(
     Ok(())
 }
 
-fn event_processing(rx: Receiver<BoardEvent>, n_boards: usize) -> Result<()> {
+fn event_processing(rx: Receiver<BoardEvent>) {
     let mut stats = Counter::new();
     let print_interval = Duration::from_secs(1);
     let mut last_print = Instant::now();
-
-    let file = File::create("output.h5")?;
-    let groups: Vec<_> = (0..n_boards)
-        .map(|board| file.create_group(&format!("board_{}", board)))
-        .collect::<Result<Vec<_>, _>>()?;
-    let datasets: Vec<_> = groups
-        .iter()
-        .map(|group| {
-            let ds = group.new_dataset::<f64>();
-            ds.shape((1,)).create("timestamp")
-        })
-        .collect::<Result<Vec<_>, _>>()?;
     loop {
         // Use a blocking recv with timeout to periodically print stats.
         match rx.recv_timeout(Duration::from_millis(100)) {
             Ok(board_event) => {
                 stats.increment(board_event.event.c_event.event_size);
                 // You can also log which board the event came from if needed.
-                println!("timestamp: {}", board_event.event.c_event.timestamp_us);
-                datasets[board_event.board_id]
-                    .write_scalar(&board_event.event.c_event.timestamp_us)?;
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 // If no event is received within the timeout, check if it's time to print.
             }
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                file.close()?;
-                break;
-            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
         }
         if last_print.elapsed() >= print_interval {
             print!(
@@ -507,6 +488,4 @@ fn event_processing(rx: Receiver<BoardEvent>, n_boards: usize) -> Result<()> {
         (stats.total_size as f64) / stats.t_begin.elapsed().as_secs_f64() / (1024.0 * 1024.0)
     );
     stdout().flush().expect("couldn't flush stdout");
-
-    Ok(())
 }
