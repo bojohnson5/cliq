@@ -242,8 +242,9 @@ fn main() -> Result<(), FELibReturn> {
     println!("done.");
 
     // Spawn a dedicated thread to process incoming events and print global stats.
+    let file = File::create("testing.h5").map_err(|_| FELibReturn::Unknown)?;
     let event_processing_handle = thread::spawn(move || {
-        event_processing(rx);
+        let _ = event_processing(rx, file);
     });
 
     // Spawn a dedicated thread to listen for user input.
@@ -447,12 +448,11 @@ fn configure_sync(
     Ok(())
 }
 
-fn event_processing(rx: Receiver<BoardEvent>) -> Result<()> {
+fn event_processing(rx: Receiver<BoardEvent>, file: File) -> Result<()> {
     let mut stats = Counter::new();
     let print_interval = Duration::from_secs(1);
     let mut last_print = Instant::now();
 
-    let file = File::create("testing.h5")?;
     let dataset = file
         .new_dataset::<u64>()
         .chunk((1,))
