@@ -88,7 +88,7 @@ pub struct EventWrapper {
     pub c_event: CEvent,
 
     // The waveform data is stored as a 2D contiguous array.
-    waveform_data: Array2<u16>,
+    pub waveform_data: Array2<u16>,
     // Owned slice of waveform pointers. We need to keep this alive so that
     // `c_event.waveform` (a raw pointer into it) remains valid.
     waveform_ptrs: Box<[*mut u16]>,
