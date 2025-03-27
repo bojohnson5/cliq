@@ -33,6 +33,7 @@ fn getch() -> std::io::Result<[u8; 1]> {
 
 /// Structure representing an event coming from a board.
 #[derive(Debug)]
+#[allow(dead_code)]
 struct BoardEvent {
     board_id: usize,
     event: EventWrapper,
@@ -46,6 +47,7 @@ struct Counter {
     t_begin: Instant,
 }
 
+#[allow(dead_code)]
 impl Counter {
     fn new() -> Self {
         Self {
@@ -124,10 +126,8 @@ fn data_taking_thread(
     }
 
     // Data-taking loop.
-    let num_ch = match config.board_settings.en_chans {
-        ChannelConfig::All(_) => 64,
-        ChannelConfig::List(chs) => chs.len(),
-    };
+    // num_ch has to be 64 due to the way CAEN reads data from the board
+    let num_ch = 64;
     let waveform_len = config.board_settings.record_len;
     let mut event = EventWrapper::new(num_ch, waveform_len);
     loop {
@@ -154,7 +154,6 @@ fn data_taking_thread(
 }
 
 fn main() -> Result<(), FELibReturn> {
-    let num_chan = 64;
     let config = Conf::from_file("config.toml").map_err(|_| FELibReturn::InvalidParam)?;
 
     // List of board connection strings. Add as many as needed.
@@ -379,8 +378,8 @@ fn configure_board(handle: u64, config: &Conf) -> Result<(), FELibReturn> {
         "/par/AcqTriggerSource",
         &config.board_settings.trig_source,
     )?;
-    felib_setvalue(handle, "/par/TestPulsePeriod", "8333333.0")?;
-    felib_setvalue(handle, "/par/TestPulseWidth", "128")?;
+    felib_setvalue(handle, "/par/TestPulsePeriod", "1000000000")?;
+    felib_setvalue(handle, "/par/TestPulseWidth", "1000")?;
     felib_setvalue(handle, "/par/TestPulseLowLevel", "0")?;
     felib_setvalue(handle, "/par/TestPulseHighLevel", "10000")?;
 
@@ -460,6 +459,7 @@ fn event_processing(rx: Receiver<BoardEvent>) {
             Ok(board_event) => {
                 stats.increment(board_event.event.c_event.event_size);
                 // You can also log which board the event came from if needed.
+                println!("{:?}", board_event.event.waveform_data);
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 // If no event is received within the timeout, check if it's time to print.
