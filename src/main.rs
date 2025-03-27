@@ -2,8 +2,8 @@ use anyhow::Result;
 use confique::Config;
 use core::str;
 use crossterm::terminal;
-use hdf5::{Dataset, File, Group};
 use rust_daq::*;
+use std::fs::File;
 use std::{
     io::{stdin, stdout, Read, Write},
     sync::{
@@ -341,12 +341,9 @@ fn get_run_delay(board_id: isize, num_boards: isize) -> isize {
 fn configure_board(handle: u64, config: &Conf) -> Result<(), FELibReturn> {
     match config.board_settings.en_chans {
         ChannelConfig::All(_) => {
-            println!("in all");
             felib_setvalue(handle, "/ch/0..63/par/ChEnable", "true")?;
         }
         ChannelConfig::List(ref channels) => {
-            println!("in list");
-            println!("list: {:?}", channels);
             for channel in channels {
                 let path = format!("/ch/{}/par/ChEnable", channel);
                 felib_setvalue(handle, &path, "true")?;
@@ -451,16 +448,19 @@ fn configure_sync(
     Ok(())
 }
 
-fn event_processing(rx: Receiver<BoardEvent>) {
+fn event_processing(rx: Receiver<BoardEvent>) -> Result<()> {
     let mut stats = Counter::new();
     let print_interval = Duration::from_secs(1);
     let mut last_print = Instant::now();
+
+    let mut file = File::create("test.bin")?;
     loop {
         // Use a blocking recv with timeout to periodically print stats.
         match rx.recv_timeout(Duration::from_millis(100)) {
             Ok(board_event) => {
                 stats.increment(board_event.event.c_event.event_size);
                 // You can also log which board the event came from if needed.
+                file.write(&board_event.event.c_event.timestamp.to_ne_bytes())?;
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 // If no event is received within the timeout, check if it's time to print.
@@ -488,4 +488,6 @@ fn event_processing(rx: Receiver<BoardEvent>) {
         (stats.total_size as f64) / stats.t_begin.elapsed().as_secs_f64() / (1024.0 * 1024.0)
     );
     stdout().flush().expect("couldn't flush stdout");
+
+    Ok(())
 }
