@@ -1,9 +1,8 @@
-use anyhow::Result;
 use confique::Config;
 use core::str;
 use crossterm::terminal;
+use hdf5::{File, Result};
 use rust_daq::*;
-use std::fs::File;
 use std::{
     io::{stdin, stdout, Read, Write},
     sync::{
@@ -453,14 +452,24 @@ fn event_processing(rx: Receiver<BoardEvent>) -> Result<()> {
     let print_interval = Duration::from_secs(1);
     let mut last_print = Instant::now();
 
-    let mut file = File::create("test.bin")?;
+    let file = File::create("testing.h5")?;
+    let dataset = file
+        .new_dataset::<u64>()
+        .chunk((1,))
+        .shape((0,))
+        .create("timestamp")?;
     loop {
         // Use a blocking recv with timeout to periodically print stats.
         match rx.recv_timeout(Duration::from_millis(100)) {
             Ok(board_event) => {
                 stats.increment(board_event.event.c_event.event_size);
                 // You can also log which board the event came from if needed.
-                file.write(&board_event.event.c_event.timestamp.to_ne_bytes())?;
+                let new_size = dataset.shape()[0] + 1;
+                dataset.resize((new_size,))?;
+                dataset.write_slice(
+                    &[board_event.event.c_event.timestamp],
+                    (new_size - 1..new_size,),
+                )?;
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 // If no event is received within the timeout, check if it's time to print.
