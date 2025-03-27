@@ -247,7 +247,8 @@ fn main() -> Result<(), FELibReturn> {
         .new_dataset::<u64>()
         .chunk((1,))
         .shape((0,))
-        .create("timestamp")?;
+        .create("timestamp")
+        .map_err(|_| FELibReturn::Unknown)?;
     let event_processing_handle = thread::spawn(move || {
         let _ = event_processing(rx, dataset);
     });
