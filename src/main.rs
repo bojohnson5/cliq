@@ -243,42 +243,7 @@ fn main() -> Result<(), FELibReturn> {
 
     // Spawn a dedicated thread to process incoming events and print global stats.
     let event_processing_handle = thread::spawn(move || {
-        let mut stats = Counter::new();
-        let print_interval = Duration::from_secs(1);
-        let mut last_print = Instant::now();
-        loop {
-            // Use a blocking recv with timeout to periodically print stats.
-            match rx.recv_timeout(Duration::from_millis(100)) {
-                Ok(board_event) => {
-                    stats.increment(board_event.event.c_event.event_size);
-                    // You can also log which board the event came from if needed.
-                }
-                Err(mpsc::RecvTimeoutError::Timeout) => {
-                    // If no event is received within the timeout, check if it's time to print.
-                }
-                Err(mpsc::RecvTimeoutError::Disconnected) => break,
-            }
-            if last_print.elapsed() >= print_interval {
-                print!(
-                    "\x1b[1K\rElapsed time: {} s\tEvents: {}\tData rate: {:.3} MB/s",
-                    stats.t_begin.elapsed().as_secs(),
-                    stats.n_events,
-                    (stats.total_size as f64)
-                        / stats.t_begin.elapsed().as_secs_f64()
-                        / (1024.0 * 1024.0)
-                );
-                stdout().flush().expect("couldn't flush stdout");
-                last_print = Instant::now();
-            }
-        }
-        // Final stats printout.
-        print!(
-            "\x1b[1K\rTotal time: {} s\tTotal events: {}\tAverage rate: {:.3} MB/s",
-            stats.t_begin.elapsed().as_secs(),
-            stats.n_events,
-            (stats.total_size as f64) / stats.t_begin.elapsed().as_secs_f64() / (1024.0 * 1024.0)
-        );
-        stdout().flush().expect("couldn't flush stdout");
+        event_processing(rx);
     });
 
     // Spawn a dedicated thread to listen for user input.
@@ -375,9 +340,12 @@ fn get_run_delay(board_id: isize, num_boards: isize) -> isize {
 fn configure_board(handle: u64, config: &Conf) -> Result<(), FELibReturn> {
     match config.board_settings.en_chans {
         ChannelConfig::All(_) => {
+            println!("in all");
             felib_setvalue(handle, "/ch/0..63/par/ChEnable", "true")?;
         }
         ChannelConfig::List(ref channels) => {
+            println!("in list");
+            println!("list: {:?}", channels);
             for channel in channels {
                 let path = format!("/ch/{}/par/ChEnable", channel);
                 felib_setvalue(handle, &path, "true")?;
@@ -480,4 +448,43 @@ fn configure_sync(
     )?;
 
     Ok(())
+}
+
+fn event_processing(rx: Receiver<BoardEvent>) {
+    let mut stats = Counter::new();
+    let print_interval = Duration::from_secs(1);
+    let mut last_print = Instant::now();
+    loop {
+        // Use a blocking recv with timeout to periodically print stats.
+        match rx.recv_timeout(Duration::from_millis(100)) {
+            Ok(board_event) => {
+                stats.increment(board_event.event.c_event.event_size);
+                // You can also log which board the event came from if needed.
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                // If no event is received within the timeout, check if it's time to print.
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+        if last_print.elapsed() >= print_interval {
+            print!(
+                "\x1b[1K\rElapsed time: {} s\tEvents: {}\tData rate: {:.3} MB/s",
+                stats.t_begin.elapsed().as_secs(),
+                stats.n_events,
+                (stats.total_size as f64)
+                    / stats.t_begin.elapsed().as_secs_f64()
+                    / (1024.0 * 1024.0)
+            );
+            stdout().flush().expect("couldn't flush stdout");
+            last_print = Instant::now();
+        }
+    }
+    // Final stats printout.
+    print!(
+        "\x1b[1K\rTotal time: {} s\tTotal events: {}\tAverage rate: {:.3} MB/s",
+        stats.t_begin.elapsed().as_secs(),
+        stats.n_events,
+        (stats.total_size as f64) / stats.t_begin.elapsed().as_secs_f64() / (1024.0 * 1024.0)
+    );
+    stdout().flush().expect("couldn't flush stdout");
 }
