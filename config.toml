@@ -1,8 +1,8 @@
 [board_settings]
 # en_chans can be either true for all channels or a list
 # of channels to enable
-en_chans = [1]
-# en_chans = true
+# en_chans = [1]
+en_chans = true
 
 # record_len is the waveform length in ns
 # record_len = 33000
@@ -14,10 +14,10 @@ trig_source = "SwTrg | TestPulse" # TrgIn is another option
 
 # dc_offset can be a single number for each channel
 # or a map for each channel
-# [dc_offset]
-# 1 = 20.0
-# 2 = 30.0
-# 50 = 50.0
+# [board_settings.dc_offset]
+# "1" = 20.0
+# "2" = 30.0
+# "50" = 50.0
 dc_offset = 50.0
 
 [sync_settings]

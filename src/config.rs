@@ -37,12 +37,12 @@ pub struct SyncSettings {
 #[serde(untagged)]
 pub enum ChannelConfig {
     All(bool),
-    List(Vec<u8>),
+    List(Vec<u32>),
 }
 
 #[derive(Deserialize, Clone, Debug)]
 #[serde(untagged)]
 pub enum DCOffsetConfig {
     Global(f64),
-    PerChannel(HashMap<u8, f64>),
+    PerChannel(HashMap<String, f64>),
 }

@@ -6,7 +6,7 @@ include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
 mod config;
 pub use config::{ChannelConfig, Conf, DCOffsetConfig};
-use ndarray::{s, Array2};
+use ndarray::Array2;
 
 use std::ffi::CString;
 
