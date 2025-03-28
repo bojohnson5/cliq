@@ -275,7 +275,11 @@ fn main() -> Result<(), FELibReturn> {
     while !quit {
         match rx_user.recv_timeout(timeout_duration) {
             Ok(c) => match &c {
-                b"s" => quit = true,
+                b"s" => {
+                    terminal::disable_raw_mode().map_err(|_| FELibReturn::Generic)?;
+                    println!("\nEnding run...");
+                    quit = true;
+                }
                 b"t" => {
                     for &(_, dev_handle) in &boards {
                         felib_sendcommand(dev_handle, "/cmd/sendswtrigger")?;
