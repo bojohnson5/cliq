@@ -1,9 +1,10 @@
 use confique::Config;
 use core::str;
+use crossterm::event::{self, Event, KeyCode};
 use crossterm::terminal;
 use rust_daq::*;
 use std::{
-    io::{stdin, stdout, Read, Write},
+    io::{stdout, Write},
     sync::{
         mpsc::{self, Receiver, Sender},
         Arc, Condvar, Mutex,
@@ -21,15 +22,6 @@ const EVENT_FORMAT: &str = " \
         { \"name\" : \"EVENT_SIZE\", \"type\" : \"SIZE_T\" } \
     ] \
 ";
-
-fn getch() -> std::io::Result<[u8; 1]> {
-    terminal::enable_raw_mode()?;
-    let mut stdin = stdin();
-    let mut buf = [0];
-    stdin.read_exact(&mut buf)?;
-    terminal::disable_raw_mode()?;
-    Ok(buf)
-}
 
 /// Structure representing an event coming from a board.
 #[derive(Debug)]
@@ -189,85 +181,71 @@ fn main() -> Result<(), FELibReturn> {
     }
     println!("done.");
 
+    let mut quit = false;
     let (tx_user, rx_user) = mpsc::channel();
     // Spawn a dedicated thread to listen for user input.
-    let _input_handle = thread::spawn(move || {
-        println!("#################################");
-        println!("Commands supported:");
-        println!("\t[t]\tSend manual trigger to all boards");
-        println!("\t[s]\tStop acquisition");
-        println!("#################################");
-        loop {
-            match getch() {
-                Ok(c) => {
-                    if tx_user.send(c).is_err() {
-                        break;
-                    }
-                    if &c == b"s" {
-                        break;
-                    }
-                }
-                Err(e) => {
-                    eprint!("error getting input: {:?}", e);
-                    break;
-                }
-            }
-        }
-    });
-    let mut quit = false;
-    let timeout_duration = Duration::from_secs(5);
+    input_thread(tx_user);
     while !quit {
+        println!("beginning run loop");
+        let timeout_duration = Duration::from_secs(10);
         let (tx, event_processing_handle, board_threads) = begin_run(&config, &boards)?;
+
         match rx_user.recv_timeout(timeout_duration) {
-            Ok(c) => match &c {
-                b"s" => {
-                    terminal::disable_raw_mode().map_err(|_| FELibReturn::Generic)?;
-                    println!("\nEnding run...");
+            Ok(c) => match c {
+                's' => {
+                    terminal::disable_raw_mode().expect("Failed to disable raw mode");
+                    println!("\nQuitting DAQ...");
+                    terminal::enable_raw_mode().expect("Failed to enable raw mode");
+                    // Stop acquisition on all boards.
+                    for &(_, dev_handle) in &boards {
+                        felib_sendcommand(dev_handle, "/cmd/disarmacquisition")?;
+                    }
+                    // Close the tx channel so that the event processing thread can exit.
+                    drop(tx);
+
+                    // Wait for the input, event processing, and board threads to finish.
+                    event_processing_handle
+                        .join()
+                        .expect("Event processing thread panicked");
+                    for handle in board_threads {
+                        handle.join().expect("A board thread panicked");
+                    }
                     quit = true;
                 }
-                b"t" => {
+                't' => {
                     for &(_, dev_handle) in &boards {
                         felib_sendcommand(dev_handle, "/cmd/sendswtrigger")?;
                     }
                 }
-                _ => (),
+                _ => {
+                    println!("OK received: read {:?} from user", c);
+                }
             },
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                terminal::disable_raw_mode().map_err(|_| FELibReturn::Generic)?;
+                terminal::disable_raw_mode().expect("Failed to disable raw mode");
+                println!("received timeout");
                 println!("\nEnding run...");
-                // // Stop acquisition on all boards.
-                // for &(_, dev_handle) in &boards {
-                //     felib_sendcommand(dev_handle, "/cmd/disarmacquisition")?;
-                // }
-                // // Close the tx channel so that the event processing thread can exit.
-                // drop(tx);
+                terminal::enable_raw_mode().expect("Failed to enable raw mode");
+                // Stop acquisition on all boards.
+                for &(_, dev_handle) in &boards {
+                    felib_sendcommand(dev_handle, "/cmd/disarmacquisition")?;
+                }
+                // Close the tx channel so that the event processing thread can exit.
+                drop(tx);
 
-                // // Wait for the input, event processing, and board threads to finish.
-                // event_processing_handle
-                //     .join()
-                //     .expect("Event processing thread panicked");
-                // for handle in board_threads {
-                //     handle.join().expect("A board thread panicked");
-                // }
+                // Wait for the input, event processing, and board threads to finish.
+                event_processing_handle
+                    .join()
+                    .expect("Event processing thread panicked");
+                for handle in board_threads {
+                    handle.join().expect("A board thread panicked");
+                }
             }
             _ => (),
         }
-        // Stop acquisition on all boards.
-        for &(_, dev_handle) in &boards {
-            felib_sendcommand(dev_handle, "/cmd/disarmacquisition")?;
-        }
-        // Close the tx channel so that the event processing thread can exit.
-        drop(tx);
-
-        // Wait for the input, event processing, and board threads to finish.
-        event_processing_handle
-            .join()
-            .expect("Event processing thread panicked");
-        for handle in board_threads {
-            handle.join().expect("A board thread panicked");
-        }
     }
 
+    terminal::disable_raw_mode().expect("Failed to disable raw mode");
     // Close all boards.
     for &(_, dev_handle) in &boards {
         felib_close(dev_handle)?;
@@ -445,7 +423,7 @@ fn event_processing(rx: Receiver<BoardEvent>) {
         }
     }
     // Final stats printout.
-    print!(
+    println!(
         "\x1b[1K\rTotal time: {} s\tTotal events: {}\tAverage rate: {:.3} MB/s",
         stats.t_begin.elapsed().as_secs(),
         stats.n_events,
@@ -516,4 +494,29 @@ fn begin_run(
     });
 
     Ok((tx, event_processing_handle, board_threads))
+}
+
+fn input_thread(tx: Sender<char>) {
+    thread::spawn(move || {
+        // Enable raw mode once.
+        terminal::enable_raw_mode().expect("Failed to enable raw mode");
+        loop {
+            // Poll with a short timeout.
+            if event::poll(Duration::from_millis(100)).expect("Polling failed") {
+                if let Event::Key(key_event) = event::read().expect("Read failed") {
+                    // Send only one character.
+                    if let KeyCode::Char(c) = key_event.code {
+                        if tx.send(c).is_err() {
+                            break;
+                        }
+                        // If "s" is pressed, exit the loop.
+                        // if c == 's' {
+                        //     break;
+                        // }
+                    }
+                }
+            }
+        }
+        terminal::disable_raw_mode().expect("Failed to disable raw mode");
+    });
 }
