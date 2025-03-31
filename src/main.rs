@@ -5,10 +5,10 @@ use rust_daq::*;
 use std::{
     io::{stdin, stdout, Read, Write},
     sync::{
-        mpsc::{self, Receiver},
+        mpsc::{self, Receiver, Sender},
         Arc, Condvar, Mutex,
     },
-    thread,
+    thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
 
@@ -189,62 +189,6 @@ fn main() -> Result<(), FELibReturn> {
     }
     println!("done.");
 
-    // // Shared signal for acquisition start.
-    // let acq_start = Arc::new((Mutex::new(false), Condvar::new()));
-    // // Shared counter for endpoint configuration.
-    // let endpoint_configured = Arc::new((Mutex::new(0u32), Condvar::new()));
-
-    // // Channel to receive events from board threads.
-    // let (tx, rx) = mpsc::channel::<BoardEvent>();
-
-    // // Spawn a data-taking thread for each board.
-    // let mut board_threads = Vec::new();
-    // for &(board_id, dev_handle) in &boards {
-    //     let config_clone = config.clone();
-    //     let acq_start_clone = Arc::clone(&acq_start);
-    //     let endpoint_configured_clone = Arc::clone(&endpoint_configured);
-    //     let tx_clone = tx.clone();
-    //     let handle = thread::spawn(move || {
-    //         data_taking_thread(
-    //             board_id,
-    //             dev_handle,
-    //             config_clone,
-    //             tx_clone,
-    //             acq_start_clone,
-    //             endpoint_configured_clone,
-    //         )
-    //         .unwrap_or_else(|e| eprintln!("Board {} error: {:?}", board_id, e));
-    //     });
-    //     board_threads.push(handle);
-    // }
-
-    // // Wait until all boards have configured their endpoints.
-    // {
-    //     let (lock, cond) = &*endpoint_configured;
-    //     let mut count = lock.lock().unwrap();
-    //     while *count < boards.len() as u32 {
-    //         count = cond.wait(count).unwrap();
-    //     }
-    // }
-
-    // // Signal acquisition start.
-    // {
-    //     let (lock, cvar) = &*acq_start;
-    //     let mut started = lock.lock().unwrap();
-    //     *started = true;
-    //     cvar.notify_all();
-    // }
-
-    // // Begin run acquisition.
-    // print!("Starting acquisition on primary board...\t");
-    // felib_sendcommand(boards[0].1, "/cmd/swstartacquisition")?;
-    // println!("done.");
-
-    // // Spawn a dedicated thread to process incoming events and print global stats.
-    // let event_processing_handle = thread::spawn(move || {
-    //     event_processing(rx);
-    // });
-
     // Spawn a dedicated thread to listen for user input.
     let (tx_user, rx_user) = mpsc::channel();
     let _input_handle = thread::spawn(move || {
@@ -265,62 +209,63 @@ fn main() -> Result<(), FELibReturn> {
     let mut quit = false;
     let timeout_duration = Duration::from_secs(10);
     while !quit {
-        // Shared signal for acquisition start.
-        let acq_start = Arc::new((Mutex::new(false), Condvar::new()));
-        // Shared counter for endpoint configuration.
-        let endpoint_configured = Arc::new((Mutex::new(0u32), Condvar::new()));
+        // // Shared signal for acquisition start.
+        // let acq_start = Arc::new((Mutex::new(false), Condvar::new()));
+        // // Shared counter for endpoint configuration.
+        // let endpoint_configured = Arc::new((Mutex::new(0u32), Condvar::new()));
 
-        // Channel to receive events from board threads.
-        let (tx, rx) = mpsc::channel::<BoardEvent>();
+        // // Channel to receive events from board threads.
+        // let (tx, rx) = mpsc::channel::<BoardEvent>();
 
-        // Spawn a data-taking thread for each board.
-        let mut board_threads = Vec::new();
-        for &(board_id, dev_handle) in &boards {
-            let config_clone = config.clone();
-            let acq_start_clone = Arc::clone(&acq_start);
-            let endpoint_configured_clone = Arc::clone(&endpoint_configured);
-            let tx_clone = tx.clone();
-            let handle = thread::spawn(move || {
-                data_taking_thread(
-                    board_id,
-                    dev_handle,
-                    config_clone,
-                    tx_clone,
-                    acq_start_clone,
-                    endpoint_configured_clone,
-                )
-                .unwrap_or_else(|e| eprintln!("Board {} error: {:?}", board_id, e));
-            });
-            board_threads.push(handle);
-        }
+        // // Spawn a data-taking thread for each board.
+        // let mut board_threads = Vec::new();
+        // for &(board_id, dev_handle) in &boards {
+        //     let config_clone = config.clone();
+        //     let acq_start_clone = Arc::clone(&acq_start);
+        //     let endpoint_configured_clone = Arc::clone(&endpoint_configured);
+        //     let tx_clone = tx.clone();
+        //     let handle = thread::spawn(move || {
+        //         data_taking_thread(
+        //             board_id,
+        //             dev_handle,
+        //             config_clone,
+        //             tx_clone,
+        //             acq_start_clone,
+        //             endpoint_configured_clone,
+        //         )
+        //         .unwrap_or_else(|e| eprintln!("Board {} error: {:?}", board_id, e));
+        //     });
+        //     board_threads.push(handle);
+        // }
 
-        // Wait until all boards have configured their endpoints.
-        {
-            let (lock, cond) = &*endpoint_configured;
-            let mut count = lock.lock().unwrap();
-            while *count < boards.len() as u32 {
-                count = cond.wait(count).unwrap();
-            }
-        }
+        // // Wait until all boards have configured their endpoints.
+        // {
+        //     let (lock, cond) = &*endpoint_configured;
+        //     let mut count = lock.lock().unwrap();
+        //     while *count < boards.len() as u32 {
+        //         count = cond.wait(count).unwrap();
+        //     }
+        // }
 
-        // Signal acquisition start.
-        {
-            let (lock, cvar) = &*acq_start;
-            let mut started = lock.lock().unwrap();
-            *started = true;
-            cvar.notify_all();
-        }
+        // // Signal acquisition start.
+        // {
+        //     let (lock, cvar) = &*acq_start;
+        //     let mut started = lock.lock().unwrap();
+        //     *started = true;
+        //     cvar.notify_all();
+        // }
 
-        // Begin run acquisition.
-        print!("Starting acquisition on primary board...\t");
-        felib_sendcommand(boards[0].1, "/cmd/swstartacquisition")?;
-        println!("done.");
+        // // Begin run acquisition.
+        // print!("Starting acquisition on primary board...\t");
+        // felib_sendcommand(boards[0].1, "/cmd/swstartacquisition")?;
+        // println!("done.");
 
-        // Spawn a dedicated thread to process incoming events and print global stats.
-        let event_processing_handle = thread::spawn(move || {
-            event_processing(rx);
-        });
+        // // Spawn a dedicated thread to process incoming events and print global stats.
+        // let event_processing_handle = thread::spawn(move || {
+        //     event_processing(rx);
+        // });
 
+        let (tx, event_processing_handle, board_threads) = begin_run(&config, &boards)?;
         match rx_user.recv_timeout(timeout_duration) {
             Ok(c) => match &c {
                 b"s" => {
@@ -542,4 +487,67 @@ fn event_processing(rx: Receiver<BoardEvent>) {
         (stats.total_size as f64) / stats.t_begin.elapsed().as_secs_f64() / (1024.0 * 1024.0)
     );
     stdout().flush().expect("couldn't flush stdout");
+}
+
+fn begin_run(
+    config: &Conf,
+    boards: &Vec<(usize, u64)>,
+) -> Result<(Sender<BoardEvent>, JoinHandle<()>, Vec<JoinHandle<()>>), FELibReturn> {
+    // Shared signal for acquisition start.
+    let acq_start = Arc::new((Mutex::new(false), Condvar::new()));
+    // Shared counter for endpoint configuration.
+    let endpoint_configured = Arc::new((Mutex::new(0u32), Condvar::new()));
+
+    // Channel to receive events from board threads.
+    let (tx, rx) = mpsc::channel::<BoardEvent>();
+
+    // Spawn a data-taking thread for each board.
+    let mut board_threads = Vec::new();
+    for &(board_id, dev_handle) in boards {
+        let config_clone = config.clone();
+        let acq_start_clone = Arc::clone(&acq_start);
+        let endpoint_configured_clone = Arc::clone(&endpoint_configured);
+        let tx_clone = tx.clone();
+        let handle = thread::spawn(move || {
+            data_taking_thread(
+                board_id,
+                dev_handle,
+                config_clone,
+                tx_clone,
+                acq_start_clone,
+                endpoint_configured_clone,
+            )
+            .unwrap_or_else(|e| eprintln!("Board {} error: {:?}", board_id, e));
+        });
+        board_threads.push(handle);
+    }
+
+    // Wait until all boards have configured their endpoints.
+    {
+        let (lock, cond) = &*endpoint_configured;
+        let mut count = lock.lock().unwrap();
+        while *count < boards.len() as u32 {
+            count = cond.wait(count).unwrap();
+        }
+    }
+
+    // Signal acquisition start.
+    {
+        let (lock, cvar) = &*acq_start;
+        let mut started = lock.lock().unwrap();
+        *started = true;
+        cvar.notify_all();
+    }
+
+    // Begin run acquisition.
+    print!("Starting acquisition on primary board...\t");
+    felib_sendcommand(boards[0].1, "/cmd/swstartacquisition")?;
+    println!("done.");
+
+    // Spawn a dedicated thread to process incoming events and print global stats.
+    let event_processing_handle = thread::spawn(move || {
+        event_processing(rx);
+    });
+
+    Ok((tx, event_processing_handle, board_threads))
 }
