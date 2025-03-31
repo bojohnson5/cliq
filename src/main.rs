@@ -197,11 +197,13 @@ fn main() -> Result<(), FELibReturn> {
         println!("\t[t]\tSend manual trigger to all boards");
         println!("\t[s]\tStop acquisition");
         println!("#################################");
-        match getch() {
-            Ok(c) => tx_user.send(c),
-            Err(_) => {
-                print!("error getting input");
-                Ok(())
+        loop {
+            match getch() {
+                Ok(c) => tx_user.send(c).expect("couldn't send key"),
+                Err(_) => {
+                    print!("error getting input");
+                    break;
+                }
             }
         }
     });
