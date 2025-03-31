@@ -338,37 +338,25 @@ fn main() -> Result<(), FELibReturn> {
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 terminal::disable_raw_mode().map_err(|_| FELibReturn::Generic)?;
                 println!("\nEnding run...");
+                // Stop acquisition on all boards.
+                for &(_, dev_handle) in &boards {
+                    felib_sendcommand(dev_handle, "/cmd/disarmacquisition")?;
+                }
                 // Close the tx channel so that the event processing thread can exit.
                 drop(tx);
 
+                // Wait for the input, event processing, and board threads to finish.
+                event_processing_handle
+                    .join()
+                    .expect("Event processing thread panicked");
+                for handle in board_threads {
+                    handle.join().expect("A board thread panicked");
+                }
                 quit = true;
             }
             _ => (),
         }
-        // Wait for the input, event processing, and board threads to finish.
-        event_processing_handle
-            .join()
-            .expect("Event processing thread panicked");
-        for handle in board_threads {
-            handle.join().expect("A board thread panicked");
-        }
     }
-
-    // Stop acquisition on all boards.
-    for &(_, dev_handle) in &boards {
-        felib_sendcommand(dev_handle, "/cmd/disarmacquisition")?;
-    }
-
-    // // Close the tx channel so that the event processing thread can exit.
-    // drop(tx);
-
-    // // Wait for the input, event processing, and board threads to finish.
-    // event_processing_handle
-    //     .join()
-    //     .expect("Event processing thread panicked");
-    // for handle in board_threads {
-    //     handle.join().expect("A board thread panicked");
-    // }
 
     // Close all boards.
     for &(_, dev_handle) in &boards {
