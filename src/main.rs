@@ -189,61 +189,61 @@ fn main() -> Result<(), FELibReturn> {
     }
     println!("done.");
 
-    // Shared signal for acquisition start.
-    let acq_start = Arc::new((Mutex::new(false), Condvar::new()));
-    // Shared counter for endpoint configuration.
-    let endpoint_configured = Arc::new((Mutex::new(0u32), Condvar::new()));
+    // // Shared signal for acquisition start.
+    // let acq_start = Arc::new((Mutex::new(false), Condvar::new()));
+    // // Shared counter for endpoint configuration.
+    // let endpoint_configured = Arc::new((Mutex::new(0u32), Condvar::new()));
 
-    // Channel to receive events from board threads.
-    let (tx, rx) = mpsc::channel::<BoardEvent>();
+    // // Channel to receive events from board threads.
+    // let (tx, rx) = mpsc::channel::<BoardEvent>();
 
-    // Spawn a data-taking thread for each board.
-    let mut board_threads = Vec::new();
-    for &(board_id, dev_handle) in &boards {
-        let config_clone = config.clone();
-        let acq_start_clone = Arc::clone(&acq_start);
-        let endpoint_configured_clone = Arc::clone(&endpoint_configured);
-        let tx_clone = tx.clone();
-        let handle = thread::spawn(move || {
-            data_taking_thread(
-                board_id,
-                dev_handle,
-                config_clone,
-                tx_clone,
-                acq_start_clone,
-                endpoint_configured_clone,
-            )
-            .unwrap_or_else(|e| eprintln!("Board {} error: {:?}", board_id, e));
-        });
-        board_threads.push(handle);
-    }
+    // // Spawn a data-taking thread for each board.
+    // let mut board_threads = Vec::new();
+    // for &(board_id, dev_handle) in &boards {
+    //     let config_clone = config.clone();
+    //     let acq_start_clone = Arc::clone(&acq_start);
+    //     let endpoint_configured_clone = Arc::clone(&endpoint_configured);
+    //     let tx_clone = tx.clone();
+    //     let handle = thread::spawn(move || {
+    //         data_taking_thread(
+    //             board_id,
+    //             dev_handle,
+    //             config_clone,
+    //             tx_clone,
+    //             acq_start_clone,
+    //             endpoint_configured_clone,
+    //         )
+    //         .unwrap_or_else(|e| eprintln!("Board {} error: {:?}", board_id, e));
+    //     });
+    //     board_threads.push(handle);
+    // }
 
-    // Wait until all boards have configured their endpoints.
-    {
-        let (lock, cond) = &*endpoint_configured;
-        let mut count = lock.lock().unwrap();
-        while *count < boards.len() as u32 {
-            count = cond.wait(count).unwrap();
-        }
-    }
+    // // Wait until all boards have configured their endpoints.
+    // {
+    //     let (lock, cond) = &*endpoint_configured;
+    //     let mut count = lock.lock().unwrap();
+    //     while *count < boards.len() as u32 {
+    //         count = cond.wait(count).unwrap();
+    //     }
+    // }
 
-    // Signal acquisition start.
-    {
-        let (lock, cvar) = &*acq_start;
-        let mut started = lock.lock().unwrap();
-        *started = true;
-        cvar.notify_all();
-    }
+    // // Signal acquisition start.
+    // {
+    //     let (lock, cvar) = &*acq_start;
+    //     let mut started = lock.lock().unwrap();
+    //     *started = true;
+    //     cvar.notify_all();
+    // }
 
-    // Begin run acquisition.
-    print!("Starting acquisition on primary board...\t");
-    felib_sendcommand(boards[0].1, "/cmd/swstartacquisition")?;
-    println!("done.");
+    // // Begin run acquisition.
+    // print!("Starting acquisition on primary board...\t");
+    // felib_sendcommand(boards[0].1, "/cmd/swstartacquisition")?;
+    // println!("done.");
 
-    // Spawn a dedicated thread to process incoming events and print global stats.
-    let event_processing_handle = thread::spawn(move || {
-        event_processing(rx);
-    });
+    // // Spawn a dedicated thread to process incoming events and print global stats.
+    // let event_processing_handle = thread::spawn(move || {
+    //     event_processing(rx);
+    // });
 
     // Spawn a dedicated thread to listen for user input.
     let (tx_user, rx_user) = mpsc::channel();
@@ -265,6 +265,62 @@ fn main() -> Result<(), FELibReturn> {
     let mut quit = false;
     let timeout_duration = Duration::from_secs(10);
     while !quit {
+        // Shared signal for acquisition start.
+        let acq_start = Arc::new((Mutex::new(false), Condvar::new()));
+        // Shared counter for endpoint configuration.
+        let endpoint_configured = Arc::new((Mutex::new(0u32), Condvar::new()));
+
+        // Channel to receive events from board threads.
+        let (tx, rx) = mpsc::channel::<BoardEvent>();
+
+        // Spawn a data-taking thread for each board.
+        let mut board_threads = Vec::new();
+        for &(board_id, dev_handle) in &boards {
+            let config_clone = config.clone();
+            let acq_start_clone = Arc::clone(&acq_start);
+            let endpoint_configured_clone = Arc::clone(&endpoint_configured);
+            let tx_clone = tx.clone();
+            let handle = thread::spawn(move || {
+                data_taking_thread(
+                    board_id,
+                    dev_handle,
+                    config_clone,
+                    tx_clone,
+                    acq_start_clone,
+                    endpoint_configured_clone,
+                )
+                .unwrap_or_else(|e| eprintln!("Board {} error: {:?}", board_id, e));
+            });
+            board_threads.push(handle);
+        }
+
+        // Wait until all boards have configured their endpoints.
+        {
+            let (lock, cond) = &*endpoint_configured;
+            let mut count = lock.lock().unwrap();
+            while *count < boards.len() as u32 {
+                count = cond.wait(count).unwrap();
+            }
+        }
+
+        // Signal acquisition start.
+        {
+            let (lock, cvar) = &*acq_start;
+            let mut started = lock.lock().unwrap();
+            *started = true;
+            cvar.notify_all();
+        }
+
+        // Begin run acquisition.
+        print!("Starting acquisition on primary board...\t");
+        felib_sendcommand(boards[0].1, "/cmd/swstartacquisition")?;
+        println!("done.");
+
+        // Spawn a dedicated thread to process incoming events and print global stats.
+        let event_processing_handle = thread::spawn(move || {
+            event_processing(rx);
+        });
+
         match rx_user.recv_timeout(timeout_duration) {
             Ok(c) => match &c {
                 b"s" => {
@@ -282,6 +338,16 @@ fn main() -> Result<(), FELibReturn> {
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 terminal::disable_raw_mode().map_err(|_| FELibReturn::Generic)?;
                 println!("\nEnding run...");
+                // Close the tx channel so that the event processing thread can exit.
+                drop(tx);
+
+                // Wait for the input, event processing, and board threads to finish.
+                event_processing_handle
+                    .join()
+                    .expect("Event processing thread panicked");
+                for handle in board_threads {
+                    handle.join().expect("A board thread panicked");
+                }
                 quit = true;
             }
             _ => (),
@@ -293,16 +359,16 @@ fn main() -> Result<(), FELibReturn> {
         felib_sendcommand(dev_handle, "/cmd/disarmacquisition")?;
     }
 
-    // Close the tx channel so that the event processing thread can exit.
-    drop(tx);
+    // // Close the tx channel so that the event processing thread can exit.
+    // drop(tx);
 
-    // Wait for the input, event processing, and board threads to finish.
-    event_processing_handle
-        .join()
-        .expect("Event processing thread panicked");
-    for handle in board_threads {
-        handle.join().expect("A board thread panicked");
-    }
+    // // Wait for the input, event processing, and board threads to finish.
+    // event_processing_handle
+    //     .join()
+    //     .expect("Event processing thread panicked");
+    // for handle in board_threads {
+    //     handle.join().expect("A board thread panicked");
+    // }
 
     // Close all boards.
     for &(_, dev_handle) in &boards {
