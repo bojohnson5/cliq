@@ -189,28 +189,39 @@ fn main() -> Result<(), FELibReturn> {
     }
     println!("done.");
 
-    println!("#################################");
-    println!("Commands supported:");
-    println!("\t[t]\tSend manual trigger to all boards");
-    println!("\t[s]\tStop acquisition");
-    println!("#################################");
+    let (tx_user, rx_user) = mpsc::channel();
+    // Spawn a dedicated thread to listen for user input.
+    let _input_handle = thread::spawn(move || {
+        println!("#################################");
+        println!("Commands supported:");
+        println!("\t[t]\tSend manual trigger to all boards");
+        println!("\t[s]\tStop acquisition");
+        println!("#################################");
+        loop {
+            match getch() {
+                Ok(c) => {
+                    if tx_user.send(c).is_err() {
+                        break;
+                    }
+                    if &c == b"s" {
+                        break;
+                    }
+                }
+                Err(e) => {
+                    eprint!("error getting input: {:?}", e);
+                    break;
+                }
+            }
+        }
+    });
     let mut quit = false;
-    let timeout_duration = Duration::from_secs(10);
+    let timeout_duration = Duration::from_secs(5);
     while !quit {
         let (tx, event_processing_handle, board_threads) = begin_run(&config, &boards)?;
-        // Spawn a dedicated thread to listen for user input.
-        let (tx_user, rx_user) = mpsc::channel();
-        let _input_handle = thread::spawn(move || match getch() {
-            Ok(c) => tx_user.send(c),
-            Err(_) => {
-                print!("error getting input");
-                Ok(())
-            }
-        });
-
         match rx_user.recv_timeout(timeout_duration) {
             Ok(c) => match &c {
                 b"s" => {
+                    terminal::disable_raw_mode().map_err(|_| FELibReturn::Generic)?;
                     println!("\nEnding run...");
                     quit = true;
                 }
@@ -222,26 +233,40 @@ fn main() -> Result<(), FELibReturn> {
                 _ => (),
             },
             Err(mpsc::RecvTimeoutError::Timeout) => {
+                terminal::disable_raw_mode().map_err(|_| FELibReturn::Generic)?;
                 println!("\nEnding run...");
-                // Stop acquisition on all boards.
-                for &(_, dev_handle) in &boards {
-                    felib_sendcommand(dev_handle, "/cmd/disarmacquisition")?;
-                }
-                // Close the tx channel so that the event processing thread can exit.
-                drop(tx);
+                // // Stop acquisition on all boards.
+                // for &(_, dev_handle) in &boards {
+                //     felib_sendcommand(dev_handle, "/cmd/disarmacquisition")?;
+                // }
+                // // Close the tx channel so that the event processing thread can exit.
+                // drop(tx);
 
-                // Wait for the input, event processing, and board threads to finish.
-                event_processing_handle
-                    .join()
-                    .expect("Event processing thread panicked");
-                for handle in board_threads {
-                    handle.join().expect("A board thread panicked");
-                }
+                // // Wait for the input, event processing, and board threads to finish.
+                // event_processing_handle
+                //     .join()
+                //     .expect("Event processing thread panicked");
+                // for handle in board_threads {
+                //     handle.join().expect("A board thread panicked");
+                // }
             }
             _ => (),
         }
+        // Stop acquisition on all boards.
+        for &(_, dev_handle) in &boards {
+            felib_sendcommand(dev_handle, "/cmd/disarmacquisition")?;
+        }
+        // Close the tx channel so that the event processing thread can exit.
+        drop(tx);
+
+        // Wait for the input, event processing, and board threads to finish.
+        event_processing_handle
+            .join()
+            .expect("Event processing thread panicked");
+        for handle in board_threads {
+            handle.join().expect("A board thread panicked");
+        }
     }
-    terminal::disable_raw_mode().map_err(|_| FELibReturn::Generic)?;
 
     // Close all boards.
     for &(_, dev_handle) in &boards {
