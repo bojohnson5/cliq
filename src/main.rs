@@ -186,7 +186,9 @@ fn main() -> Result<(), FELibReturn> {
     // Spawn a dedicated thread to listen for user input.
     input_thread(tx_user);
     while !quit {
+        terminal::enable_raw_mode().expect("Failed to enable raw mode");
         println!("beginning run loop");
+        terminal::disable_raw_mode().expect("Failed to enable raw mode");
         let timeout_duration = Duration::from_secs(10);
         let (tx, event_processing_handle, board_threads) = begin_run(&config, &boards)?;
 
@@ -436,7 +438,9 @@ fn begin_run(
     config: &Conf,
     boards: &Vec<(usize, u64)>,
 ) -> Result<(Sender<BoardEvent>, JoinHandle<()>, Vec<JoinHandle<()>>), FELibReturn> {
+    terminal::enable_raw_mode().expect("Failed to enable raw mode");
     println!("beginning new run");
+    terminal::disable_raw_mode().expect("Failed to disable raw mode");
     // Shared signal for acquisition start.
     let acq_start = Arc::new((Mutex::new(false), Condvar::new()));
     // Shared counter for endpoint configuration.
@@ -509,10 +513,6 @@ fn input_thread(tx: Sender<char>) {
                         if tx.send(c).is_err() {
                             break;
                         }
-                        // If "s" is pressed, exit the loop.
-                        // if c == 's' {
-                        //     break;
-                        // }
                     }
                 }
             }
