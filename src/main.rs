@@ -479,6 +479,19 @@ fn event_processing(rx: Receiver<BoardEvent>) {
             stdout().flush().expect("couldn't flush stdout");
             last_print = Instant::now();
         }
+        // let ret = felib_readdata(ep_handle, &mut event);
+        // match ret {
+        //     FELibReturn::Success => {
+        //         total.increment(event.c_event.event_size);
+        //         current.increment(event.c_event.event_size);
+        //     }
+        //     FELibReturn::Timeout => (),
+        //     FELibReturn::Stop => {
+        //         println!("\nStop received.");
+        //         break;
+        //     }
+        //     _ => (),
+        // }
     }
     // Final stats printout.
     print!(

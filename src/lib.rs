@@ -1,6 +1,6 @@
-#![allow(non_upper_case_globals)]
-#![allow(non_camel_case_types)]
-#![allow(non_snake_case)]
+mod dig2;
+mod event;
+mod felib;
 
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
@@ -57,7 +57,7 @@ impl From<i32> for FELibReturn {
 }
 
 pub struct AcqControl {
-    pub dev_handle: u64,
+    pub dig: Dig2,
     pub ep_configured: bool,
     pub acq_started: bool,
     pub num_ch: usize,
