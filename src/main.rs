@@ -189,33 +189,28 @@ fn main() -> Result<(), FELibReturn> {
     }
     println!("done.");
 
-    // Spawn a dedicated thread to listen for user input.
-    let (tx_user, rx_user) = mpsc::channel();
-    let _input_handle = thread::spawn(move || {
-        println!("#################################");
-        println!("Commands supported:");
-        println!("\t[t]\tSend manual trigger to all boards");
-        println!("\t[s]\tStop acquisition");
-        println!("#################################");
-        loop {
-            match getch() {
-                Ok(c) => tx_user.send(c).expect("couldn't send key"),
-                Err(_) => {
-                    print!("error getting input");
-                    break;
-                }
-            }
-        }
-    });
-
+    println!("#################################");
+    println!("Commands supported:");
+    println!("\t[t]\tSend manual trigger to all boards");
+    println!("\t[s]\tStop acquisition");
+    println!("#################################");
     let mut quit = false;
     let timeout_duration = Duration::from_secs(10);
     while !quit {
         let (tx, event_processing_handle, board_threads) = begin_run(&config, &boards)?;
+        // Spawn a dedicated thread to listen for user input.
+        let (tx_user, rx_user) = mpsc::channel();
+        let _input_handle = thread::spawn(move || match getch() {
+            Ok(c) => tx_user.send(c),
+            Err(_) => {
+                print!("error getting input");
+                Ok(())
+            }
+        });
+
         match rx_user.recv_timeout(timeout_duration) {
             Ok(c) => match &c {
                 b"s" => {
-                    terminal::disable_raw_mode().map_err(|_| FELibReturn::Generic)?;
                     println!("\nEnding run...");
                     quit = true;
                 }
@@ -227,7 +222,6 @@ fn main() -> Result<(), FELibReturn> {
                 _ => (),
             },
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                terminal::disable_raw_mode().map_err(|_| FELibReturn::Generic)?;
                 println!("\nEnding run...");
                 // Stop acquisition on all boards.
                 for &(_, dev_handle) in &boards {
@@ -247,6 +241,7 @@ fn main() -> Result<(), FELibReturn> {
             _ => (),
         }
     }
+    terminal::disable_raw_mode().map_err(|_| FELibReturn::Generic)?;
 
     // Close all boards.
     for &(_, dev_handle) in &boards {
