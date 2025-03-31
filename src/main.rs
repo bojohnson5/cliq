@@ -1,7 +1,6 @@
 use confique::Config;
 use core::str;
 use crossterm::terminal;
-use hdf5::{Dataset, File, Result};
 use rust_daq::*;
 use std::{
     io::{stdin, stdout, Read, Write},
@@ -242,15 +241,8 @@ fn main() -> Result<(), FELibReturn> {
     println!("done.");
 
     // Spawn a dedicated thread to process incoming events and print global stats.
-    let file = File::create("testing.h5").map_err(|_| FELibReturn::Unknown)?;
-    let dataset = file
-        .new_dataset::<u64>()
-        .chunk((1,))
-        .shape((0,))
-        .create("timestamp")
-        .map_err(|_| FELibReturn::Unknown)?;
     let event_processing_handle = thread::spawn(move || {
-        let _ = event_processing(rx, dataset);
+        event_processing(rx);
     });
 
     // Spawn a dedicated thread to listen for user input.
@@ -458,7 +450,7 @@ fn configure_sync(
     Ok(())
 }
 
-fn event_processing(rx: Receiver<BoardEvent>, dataset: Dataset) -> Result<()> {
+fn event_processing(rx: Receiver<BoardEvent>) {
     let mut stats = Counter::new();
     let print_interval = Duration::from_secs(1);
     let mut last_print = Instant::now();
@@ -469,12 +461,6 @@ fn event_processing(rx: Receiver<BoardEvent>, dataset: Dataset) -> Result<()> {
             Ok(board_event) => {
                 stats.increment(board_event.event.c_event.event_size);
                 // You can also log which board the event came from if needed.
-                let new_size = dataset.shape()[0] + 1;
-                dataset.resize((new_size,))?;
-                dataset.write_slice(
-                    &[board_event.event.c_event.timestamp],
-                    (new_size - 1..new_size,),
-                )?;
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 // If no event is received within the timeout, check if it's time to print.
@@ -502,6 +488,4 @@ fn event_processing(rx: Receiver<BoardEvent>, dataset: Dataset) -> Result<()> {
         (stats.total_size as f64) / stats.t_begin.elapsed().as_secs_f64() / (1024.0 * 1024.0)
     );
     stdout().flush().expect("couldn't flush stdout");
-
-    Ok(())
 }
