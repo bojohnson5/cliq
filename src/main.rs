@@ -341,16 +341,16 @@ fn main() -> Result<(), FELibReturn> {
                 // Close the tx channel so that the event processing thread can exit.
                 drop(tx);
 
-                // Wait for the input, event processing, and board threads to finish.
-                event_processing_handle
-                    .join()
-                    .expect("Event processing thread panicked");
-                for handle in board_threads {
-                    handle.join().expect("A board thread panicked");
-                }
                 quit = true;
             }
             _ => (),
+        }
+        // Wait for the input, event processing, and board threads to finish.
+        event_processing_handle
+            .join()
+            .expect("Event processing thread panicked");
+        for handle in board_threads {
+            handle.join().expect("A board thread panicked");
         }
     }
 
