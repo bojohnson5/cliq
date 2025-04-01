@@ -84,6 +84,26 @@ fn print_dig_details(handle: u64) -> Result<(), FELibReturn> {
     Ok(())
 }
 
+fn data_taking_thread_panic(
+    board_id: usize,
+    dev_handle: u64,
+    config: Conf,
+    tx: Sender<BoardEvent>,
+    acq_start: Arc<(Mutex<bool>, Condvar)>,
+    endpoint_configured: Arc<(Mutex<u32>, Condvar)>,
+) -> Result<(), FELibReturn> {
+    data_taking_thread(
+        board_id,
+        dev_handle,
+        config,
+        tx,
+        acq_start,
+        endpoint_configured,
+    )
+    .unwrap();
+    Ok(())
+}
+
 /// Data-taking thread function for one board.
 /// It configures the endpoint, signals that configuration is complete,
 /// waits for the shared acquisition start signal, then continuously reads events and sends them.
@@ -468,7 +488,7 @@ fn begin_run(
         let endpoint_configured_clone = Arc::clone(&endpoint_configured);
         let tx_clone = tx.clone();
         let handle = thread::spawn(move || {
-            data_taking_thread(
+            data_taking_thread_panic(
                 board_id,
                 dev_handle,
                 config_clone,
