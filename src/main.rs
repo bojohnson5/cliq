@@ -1,14 +1,11 @@
 use confique::Config;
 use core::str;
 use crossbeam_channel::{unbounded, Receiver, RecvTimeoutError, Sender};
-use crossterm::cursor::{MoveToColumn, MoveToNextLine};
+use crossterm::cursor::{MoveTo, MoveToColumn, MoveToNextLine};
 use crossterm::event::{self, Event, KeyCode};
-use crossterm::terminal;
-use crossterm::{
-    cursor::MoveTo,
-    execute,
-    terminal::{Clear, ClearType},
-};
+use crossterm::execute;
+use crossterm::terminal::{self, Clear, ClearType};
+use hdf5::File;
 use rust_daq::*;
 use std::{
     io::{stdout, Write},
@@ -421,6 +418,13 @@ fn event_processing(rx: Receiver<BoardEvent>) {
     let print_interval = Duration::from_secs(1);
     let mut last_print = Instant::now();
 
+    let file = File::create("testing.h5").unwrap();
+    let group = file.create_group("group").unwrap();
+    let builder = group
+        .new_dataset::<f64>()
+        .chunk((2,))
+        .create("data")
+        .unwrap();
     loop {
         // Use a blocking recv with timeout to periodically print stats.
         match rx.recv_timeout(Duration::from_millis(100)) {
