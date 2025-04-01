@@ -1,3 +1,4 @@
+use anyhow::Result;
 use confique::Config;
 use core::str;
 use crossbeam_channel::{unbounded, Receiver, RecvTimeoutError, Sender};
@@ -5,7 +6,8 @@ use crossterm::cursor::{MoveTo, MoveToColumn, MoveToNextLine};
 use crossterm::event::{self, Event, KeyCode};
 use crossterm::execute;
 use crossterm::terminal::{self, Clear, ClearType};
-use hdf5::File;
+use hdf5::{Dataset, File};
+use ndarray::Array2;
 use rust_daq::*;
 use std::{
     io::{stdout, Write},
@@ -23,6 +25,50 @@ const EVENT_FORMAT: &str = " \
         { \"name\" : \"EVENT_SIZE\", \"type\" : \"SIZE_T\" } \
     ] \
 ";
+
+struct HDF5Writer {
+    file: File,
+    dataset: Dataset,
+    current_rows: usize,
+}
+
+impl HDF5Writer {
+    fn new(filename: &str, dataset_name: &str, n_cols: usize) -> hdf5::Result<Self> {
+        let file = File::create(filename)?;
+
+        // Create an extendable dataset with an unlimited max size
+        let dataset = file
+            .new_dataset::<u16>()
+            .shape((0, n_cols)) // Start with 0 rows
+            .chunk((64, n_cols)) // Set chunk size (tune for performance)
+            .create(dataset_name)?;
+
+        Ok(Self {
+            file,
+            dataset,
+            current_rows: 0,
+        })
+    }
+
+    fn append_waveform(&mut self, waveform: &Array2<u16>) -> hdf5::Result<()> {
+        let (new_rows, n_cols) = waveform.dim();
+
+        // Resize dataset to accommodate new data
+        self.dataset
+            .resize((self.current_rows + new_rows, n_cols))?;
+
+        // Write new data at the correct position
+        self.dataset.write_slice(
+            waveform,
+            (self.current_rows, ..), // Offset at current row
+        )?;
+
+        // Update row count
+        self.current_rows += new_rows;
+
+        Ok(())
+    }
+}
 
 /// Structure representing an event coming from a board.
 #[derive(Debug)]
@@ -78,26 +124,6 @@ fn print_dig_details(handle: u64) -> Result<(), FELibReturn> {
     println!("ADC rate:\t{samplerate}");
     let cupver = felib_getvalue(handle, "/par/cupver")?;
     println!("CUP version:\t{cupver}");
-    Ok(())
-}
-
-fn data_taking_thread_panic(
-    board_id: usize,
-    dev_handle: u64,
-    config: Conf,
-    tx: Sender<BoardEvent>,
-    acq_start: Arc<(Mutex<bool>, Condvar)>,
-    endpoint_configured: Arc<(Mutex<u32>, Condvar)>,
-) -> Result<(), FELibReturn> {
-    data_taking_thread(
-        board_id,
-        dev_handle,
-        config,
-        tx,
-        acq_start,
-        endpoint_configured,
-    )
-    .unwrap();
     Ok(())
 }
 
@@ -342,7 +368,7 @@ fn configure_board(handle: u64, config: &Conf) -> Result<(), FELibReturn> {
         "/par/AcqTriggerSource",
         &config.board_settings.trig_source,
     )?;
-    felib_setvalue(handle, "/par/TestPulsePeriod", "8333333")?;
+    felib_setvalue(handle, "/par/TestPulsePeriod", "1000000000")?;
     felib_setvalue(handle, "/par/TestPulseWidth", "1000")?;
     felib_setvalue(handle, "/par/TestPulseLowLevel", "0")?;
     felib_setvalue(handle, "/par/TestPulseHighLevel", "10000")?;
@@ -418,19 +444,16 @@ fn event_processing(rx: Receiver<BoardEvent>) {
     let print_interval = Duration::from_secs(1);
     let mut last_print = Instant::now();
 
-    let file = File::create("testing.h5").unwrap();
-    let group = file.create_group("group").unwrap();
-    let builder = group
-        .new_dataset::<f64>()
-        .chunk((2,))
-        .create("data")
-        .unwrap();
+    let mut writer = HDF5Writer::new("testing.h5", "waveforms", 4125).unwrap();
     loop {
         // Use a blocking recv with timeout to periodically print stats.
         match rx.recv_timeout(Duration::from_millis(100)) {
             Ok(board_event) => {
                 stats.increment(board_event.event.c_event.event_size);
                 // You can also log which board the event came from if needed.
+                writer
+                    .append_waveform(&board_event.event.waveform_data)
+                    .unwrap();
             }
             Err(RecvTimeoutError::Timeout) => {
                 // If no event is received within the timeout, check if it's time to print.
@@ -492,7 +515,7 @@ fn begin_run(
         let endpoint_configured_clone = Arc::clone(&endpoint_configured);
         let tx_clone = tx.clone();
         let handle = thread::spawn(move || {
-            data_taking_thread_panic(
+            data_taking_thread(
                 board_id,
                 dev_handle,
                 config_clone,
