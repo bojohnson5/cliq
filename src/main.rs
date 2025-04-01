@@ -1,14 +1,18 @@
 use confique::Config;
 use core::str;
+use crossbeam_channel::{unbounded, Receiver, RecvTimeoutError, Sender};
+use crossterm::cursor::{MoveToColumn, MoveToNextLine};
 use crossterm::event::{self, Event, KeyCode};
 use crossterm::terminal;
+use crossterm::{
+    cursor::MoveTo,
+    execute,
+    terminal::{Clear, ClearType},
+};
 use rust_daq::*;
 use std::{
     io::{stdout, Write},
-    sync::{
-        mpsc::{self, Receiver, Sender},
-        Arc, Condvar, Mutex,
-    },
+    sync::{Arc, Condvar, Mutex},
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
@@ -87,7 +91,7 @@ fn data_taking_thread(
     board_id: usize,
     dev_handle: u64,
     config: Conf,
-    tx: mpsc::Sender<BoardEvent>,
+    tx: Sender<BoardEvent>,
     acq_start: Arc<(Mutex<bool>, Condvar)>,
     endpoint_configured: Arc<(Mutex<u32>, Condvar)>,
 ) -> Result<(), FELibReturn> {
@@ -136,7 +140,12 @@ fn data_taking_thread(
             }
             FELibReturn::Timeout => continue,
             FELibReturn::Stop => {
-                println!("\nBoard {}: Stop received.", board_id);
+                print_status(
+                    &format!("Board {}: Stop received...", board_id),
+                    false,
+                    true,
+                    false,
+                );
                 break;
             }
             _ => (),
@@ -182,22 +191,18 @@ fn main() -> Result<(), FELibReturn> {
     println!("done.");
 
     let mut quit = false;
-    let (tx_user, rx_user) = mpsc::channel();
+    let (tx_user, rx_user) = unbounded();
+
     // Spawn a dedicated thread to listen for user input.
     input_thread(tx_user);
     while !quit {
-        terminal::enable_raw_mode().expect("Failed to enable raw mode");
-        println!("beginning run loop");
-        terminal::disable_raw_mode().expect("Failed to enable raw mode");
-        let timeout_duration = Duration::from_secs(10);
+        let timeout_duration = Duration::from_secs(config.run_settings.run_duration);
         let (tx, event_processing_handle, board_threads) = begin_run(&config, &boards)?;
 
         match rx_user.recv_timeout(timeout_duration) {
             Ok(c) => match c {
                 's' => {
-                    terminal::disable_raw_mode().expect("Failed to disable raw mode");
-                    println!("\nQuitting DAQ...");
-                    terminal::enable_raw_mode().expect("Failed to enable raw mode");
+                    print_status("Quitting DAQ...", false, true, false);
                     // Stop acquisition on all boards.
                     for &(_, dev_handle) in &boards {
                         felib_sendcommand(dev_handle, "/cmd/disarmacquisition")?;
@@ -223,11 +228,8 @@ fn main() -> Result<(), FELibReturn> {
                     println!("OK received: read {:?} from user", c);
                 }
             },
-            Err(mpsc::RecvTimeoutError::Timeout) => {
-                terminal::disable_raw_mode().expect("Failed to disable raw mode");
-                println!("received timeout");
-                println!("\nEnding run...");
-                terminal::enable_raw_mode().expect("Failed to enable raw mode");
+            Err(RecvTimeoutError::Timeout) => {
+                print_status("Ending run...", false, true, false);
                 // Stop acquisition on all boards.
                 for &(_, dev_handle) in &boards {
                     felib_sendcommand(dev_handle, "/cmd/disarmacquisition")?;
@@ -310,12 +312,12 @@ fn configure_board(handle: u64, config: &Conf) -> Result<(), FELibReturn> {
     }
     felib_setvalue(
         handle,
-        "/par/RecordLengthT",
+        "/par/RecordLengthS",
         &config.board_settings.record_len.to_string(),
     )?;
     felib_setvalue(
         handle,
-        "/par/PreTriggerT",
+        "/par/PreTriggerS",
         &config.board_settings.pre_trig_len.to_string(),
     )?;
     felib_setvalue(
@@ -323,7 +325,7 @@ fn configure_board(handle: u64, config: &Conf) -> Result<(), FELibReturn> {
         "/par/AcqTriggerSource",
         &config.board_settings.trig_source,
     )?;
-    felib_setvalue(handle, "/par/TestPulsePeriod", "1000000000")?;
+    felib_setvalue(handle, "/par/TestPulsePeriod", "8333333")?;
     felib_setvalue(handle, "/par/TestPulseWidth", "1000")?;
     felib_setvalue(handle, "/par/TestPulseLowLevel", "0")?;
     felib_setvalue(handle, "/par/TestPulseHighLevel", "10000")?;
@@ -406,48 +408,57 @@ fn event_processing(rx: Receiver<BoardEvent>) {
                 stats.increment(board_event.event.c_event.event_size);
                 // You can also log which board the event came from if needed.
             }
-            Err(mpsc::RecvTimeoutError::Timeout) => {
+            Err(RecvTimeoutError::Timeout) => {
                 // If no event is received within the timeout, check if it's time to print.
             }
-            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            Err(RecvTimeoutError::Disconnected) => break,
         }
         if last_print.elapsed() >= print_interval {
-            print!(
-                "\x1b[1K\rElapsed time: {} s\tEvents: {}\tData rate: {:.3} MB/s",
-                stats.t_begin.elapsed().as_secs(),
-                stats.n_events,
-                (stats.total_size as f64)
-                    / stats.t_begin.elapsed().as_secs_f64()
-                    / (1024.0 * 1024.0)
+            print_status(
+                &format!(
+                    // "\x1b[1K\rElapsed time: {} s\tEvents: {}\tData rate: {:.3} MB/s",
+                    "Elapsed time: {} s\tEvents: {}\tData rate: {:.3} MB/s\tIn queue: {}",
+                    stats.t_begin.elapsed().as_secs(),
+                    stats.n_events,
+                    (stats.total_size as f64)
+                        / stats.t_begin.elapsed().as_secs_f64()
+                        / (1024.0 * 1024.0),
+                    rx.len(),
+                ),
+                false,
+                false,
+                true,
             );
-            stdout().flush().expect("couldn't flush stdout");
             last_print = Instant::now();
         }
     }
     // Final stats printout.
-    println!(
-        "\x1b[1K\rTotal time: {} s\tTotal events: {}\tAverage rate: {:.3} MB/s",
-        stats.t_begin.elapsed().as_secs(),
-        stats.n_events,
-        (stats.total_size as f64) / stats.t_begin.elapsed().as_secs_f64() / (1024.0 * 1024.0)
+    print_status(
+        &format!(
+            "Total time: {} s\tTotal events: {}\tAverage rate: {:.3} MB/s",
+            stats.t_begin.elapsed().as_secs(),
+            stats.n_events,
+            (stats.total_size as f64) / stats.t_begin.elapsed().as_secs_f64() / (1024.0 * 1024.0)
+        ),
+        false,
+        false,
+        true,
     );
-    stdout().flush().expect("couldn't flush stdout");
 }
 
 fn begin_run(
     config: &Conf,
     boards: &Vec<(usize, u64)>,
 ) -> Result<(Sender<BoardEvent>, JoinHandle<()>, Vec<JoinHandle<()>>), FELibReturn> {
-    terminal::enable_raw_mode().expect("Failed to enable raw mode");
-    println!("beginning new run");
-    terminal::disable_raw_mode().expect("Failed to disable raw mode");
+    print_status("Beginning new run", true, true, false);
+    print_status("Press [s] to stop data acquisition", false, true, false);
     // Shared signal for acquisition start.
     let acq_start = Arc::new((Mutex::new(false), Condvar::new()));
     // Shared counter for endpoint configuration.
     let endpoint_configured = Arc::new((Mutex::new(0u32), Condvar::new()));
 
     // Channel to receive events from board threads.
-    let (tx, rx) = mpsc::channel::<BoardEvent>();
+    let (tx, rx) = unbounded();
 
     // Spawn a data-taking thread for each board.
     let mut board_threads = Vec::new();
@@ -488,9 +499,14 @@ fn begin_run(
     }
 
     // Begin run acquisition.
-    print!("Starting acquisition on primary board...\t");
+    print_status(
+        "Starting acquisition on primary board...",
+        false,
+        true,
+        false,
+    );
     felib_sendcommand(boards[0].1, "/cmd/swstartacquisition")?;
-    println!("done.");
+    print_status("done.", false, false, false);
 
     // Spawn a dedicated thread to process incoming events and print global stats.
     let event_processing_handle = thread::spawn(move || {
@@ -519,4 +535,19 @@ fn input_thread(tx: Sender<char>) {
         }
         terminal::disable_raw_mode().expect("Failed to disable raw mode");
     });
+}
+
+fn print_status(status: &str, clear_screen: bool, move_line: bool, clear_line: bool) {
+    let mut stdout = stdout();
+    if clear_screen {
+        execute!(stdout, Clear(ClearType::All), MoveTo(0, 0)).unwrap();
+    }
+    if move_line {
+        execute!(stdout, MoveToNextLine(1)).unwrap();
+    }
+    if clear_line {
+        execute!(stdout, Clear(ClearType::CurrentLine), MoveToColumn(0)).unwrap();
+    }
+    write!(stdout, "{}", status).unwrap();
+    stdout.flush().unwrap();
 }

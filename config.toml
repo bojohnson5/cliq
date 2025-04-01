@@ -1,15 +1,19 @@
+[run_settings]
+# run duration in seconds
+run_duration = 900
+
 [board_settings]
 # en_chans can be either true for all channels or a list
 # of channels to enable
 # en_chans = [1]
 en_chans = true
 
-# record_len is the waveform length in ns
+# record_len is the waveform length in samples
 # record_len = 33000
-record_len = 1000
+record_len = 4125
 
-# pre_trig_len is pre-trigger length in ns
-pre_trig_len = 100
+# pre_trig_len is pre-trigger length in samples
+pre_trig_len = 1250
 trig_source = "SwTrg | TestPulse" # TrgIn is another option
 
 # dc_offset can be a single number for each channel

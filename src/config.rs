@@ -5,9 +5,16 @@ use std::collections::HashMap;
 #[derive(Config, Debug, Clone)]
 pub struct Conf {
     #[config(nested)]
+    pub run_settings: RunSettings,
+    #[config(nested)]
     pub board_settings: BoardSettings,
     #[config(nested)]
     pub sync_settings: SyncSettings,
+}
+
+#[derive(Config, Debug, Clone)]
+pub struct RunSettings {
+    pub run_duration: u64,
 }
 
 #[derive(Config, Debug, Clone)]

@@ -11,6 +11,7 @@ hdf5 = { package = "hdf5-metno", version = "0.10.0" }
 ndarray = "0.16.1"
 anyhow = "1.0.97"
 libc = "0.2.171"
+crossbeam-channel = "0.5.14"
 
 [build-dependencies]
 bindgen = "0.71.0"
