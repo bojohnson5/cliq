@@ -1,5 +1,5 @@
-use anyhow::Result;
-use confique::{Config, FormatOptions};
+use anyhow::{anyhow, Result};
+use confique::Config;
 use core::str;
 use crossbeam_channel::{unbounded, Receiver, RecvTimeoutError, Sender};
 use crossterm::cursor::{MoveTo, MoveToColumn, MoveToNextLine};
@@ -29,45 +29,59 @@ const EVENT_FORMAT: &str = " \
 ";
 
 struct HDF5Writer {
-    file: File,
     dataset: Dataset,
-    current_rows: usize,
+    current_event: usize,
+    max_events: usize,
+    n_channels: usize,
+    n_samples: usize,
 }
 
 impl HDF5Writer {
-    fn new(filename: &str, dataset_name: &str, n_cols: usize) -> hdf5::Result<Self> {
+    /// Create a new writer that preallocates a dataset with shape
+    /// (max_events, n_channels, n_samples). Each event is a 2D array.
+    fn new(
+        filename: &str,
+        dataset_name: &str,
+        n_channels: usize,
+        n_samples: usize,
+        max_events: usize,
+    ) -> Result<Self> {
         let file = File::create(filename)?;
 
-        // Create an extendable dataset with an unlimited max size
+        // Preallocate a dataset with a fixed maximum number of events.
+        // For example, shape = (max_events, n_channels, n_samples)
+        let shape = (max_events, n_channels, n_samples);
         let dataset = file
             .new_dataset::<u16>()
-            .shape((0, n_cols)) // Start with 0 rows
-            .chunk((64, n_cols)) // Set chunk size (tune for performance)
+            .shape(shape)
             .create(dataset_name)?;
 
         Ok(Self {
-            file,
             dataset,
-            current_rows: 0,
+            current_event: 0,
+            max_events,
+            n_channels,
+            n_samples,
         })
     }
 
-    fn append_waveform(&mut self, waveform: &Array2<u16>) -> hdf5::Result<()> {
-        let (new_rows, n_cols) = waveform.dim();
-
-        // Resize dataset to accommodate new data
+    /// Append a new event (a 2D array with shape (n_channels, n_samples))
+    /// into the next available slice of the 3D dataset.
+    fn append_event(&mut self, event_data: &Array2<u16>) -> Result<()> {
+        // Verify that the incoming event data has the correct dimensions.
+        let (channels, samples) = event_data.dim();
+        if channels != self.n_channels || samples != self.n_samples {
+            return Err(anyhow!("Event dimensions do not match dataset dimensions"));
+        }
+        // Check if there is still space in the preallocated dataset.
+        if self.current_event >= self.max_events {
+            return Err(anyhow!("Maximum number of events reached"));
+        }
+        // Write the event data at the slice corresponding to the current event.
+        // Here we assume that hdf5-metno's `write_slice` method accepts a tuple of offsets.
         self.dataset
-            .resize((self.current_rows + new_rows, n_cols))?;
-
-        // Write new data at the correct position
-        self.dataset.write_slice(
-            waveform,
-            (self.current_rows, ..), // Offset at current row
-        )?;
-
-        // Update row count
-        self.current_rows += new_rows;
-
+            .write_slice(event_data, (self.current_event, .., ..))?;
+        self.current_event += 1;
         Ok(())
     }
 }
@@ -446,16 +460,17 @@ fn event_processing(rx: Receiver<BoardEvent>, run_file: PathBuf) {
     let print_interval = Duration::from_secs(1);
     let mut last_print = Instant::now();
 
-    let mut writer = HDF5Writer::new(run_file.to_str().unwrap(), "waveforms", 4125).unwrap();
+    let mut writer =
+        HDF5Writer::new(run_file.to_str().unwrap(), "waveforms", 64, 4125, 1000).unwrap();
     loop {
         // Use a blocking recv with timeout to periodically print stats.
         match rx.recv_timeout(Duration::from_millis(100)) {
             Ok(board_event) => {
                 stats.increment(board_event.event.c_event.event_size);
                 // You can also log which board the event came from if needed.
-                // writer
-                //     .append_waveform(&board_event.event.waveform_data)
-                //     .unwrap();
+                writer
+                    .append_event(&board_event.event.waveform_data)
+                    .unwrap();
             }
             Err(RecvTimeoutError::Timeout) => {
                 // If no event is received within the timeout, check if it's time to print.
