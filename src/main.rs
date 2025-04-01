@@ -184,7 +184,7 @@ fn data_taking_thread(
             FELibReturn::Timeout => continue,
             FELibReturn::Stop => {
                 print_status(
-                    &format!("Board {}: Stop received...", board_id),
+                    &format!("Board {}: Stop received...\n", board_id),
                     false,
                     true,
                     false,
@@ -555,6 +555,9 @@ fn begin_run(
     felib_sendcommand(boards[0].1, "/cmd/swstartacquisition")?;
     print_status("done.", false, false, false);
 
+    // Create the appropriate directory for file-writing
+    create_run_dir(config);
+
     // Spawn a dedicated thread to process incoming events and print global stats.
     let event_processing_handle = thread::spawn(move || {
         event_processing(rx);
@@ -597,4 +600,16 @@ fn print_status(status: &str, clear_screen: bool, move_line: bool, clear_line: b
     }
     write!(stdout, "{}", status).unwrap();
     stdout.flush().unwrap();
+}
+
+fn create_run_dir(config: &Conf) {
+    let output_dir = format!(
+        "{}/camp{}",
+        config.run_settings.output_dir, config.run_settings.campaign_num
+    );
+    let path = std::path::Path::new(&output_dir);
+    match std::fs::create_dir(path) {
+        Ok(_) => print_status("created output dir", false, true, false),
+        Err(e) => print_status(&format!("error creating dir: {:?}", e), false, true, false),
+    }
 }

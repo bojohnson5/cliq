@@ -15,6 +15,8 @@ pub struct Conf {
 #[derive(Config, Debug, Clone)]
 pub struct RunSettings {
     pub run_duration: u64,
+    pub output_dir: String,
+    pub campaign_num: usize,
 }
 
 #[derive(Config, Debug, Clone)]

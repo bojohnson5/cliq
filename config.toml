@@ -1,6 +1,8 @@
 [run_settings]
 # run duration in seconds
 run_duration = 30
+output_dir = "~/Documents/testing"
+campaign_num = 0
 
 [board_settings]
 # en_chans can be either true for all channels or a list
