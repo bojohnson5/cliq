@@ -1,5 +1,5 @@
 use anyhow::Result;
-use confique::Config;
+use confique::{Config, FormatOptions};
 use core::str;
 use crossbeam_channel::{unbounded, Receiver, RecvTimeoutError, Sender};
 use crossterm::cursor::{MoveTo, MoveToColumn, MoveToNextLine};
@@ -9,6 +9,8 @@ use crossterm::terminal::{self, Clear, ClearType};
 use hdf5::{Dataset, File};
 use ndarray::Array2;
 use rust_daq::*;
+use std::fs::DirEntry;
+use std::path::PathBuf;
 use std::{
     io::{stdout, Write},
     sync::{Arc, Condvar, Mutex},
@@ -439,21 +441,21 @@ fn configure_sync(
     Ok(())
 }
 
-fn event_processing(rx: Receiver<BoardEvent>) {
+fn event_processing(rx: Receiver<BoardEvent>, run_file: PathBuf) {
     let mut stats = Counter::new();
     let print_interval = Duration::from_secs(1);
     let mut last_print = Instant::now();
 
-    let mut writer = HDF5Writer::new("testing.h5", "waveforms", 4125).unwrap();
+    let mut writer = HDF5Writer::new(run_file.to_str().unwrap(), "waveforms", 4125).unwrap();
     loop {
         // Use a blocking recv with timeout to periodically print stats.
         match rx.recv_timeout(Duration::from_millis(100)) {
             Ok(board_event) => {
                 stats.increment(board_event.event.c_event.event_size);
                 // You can also log which board the event came from if needed.
-                writer
-                    .append_waveform(&board_event.event.waveform_data)
-                    .unwrap();
+                // writer
+                //     .append_waveform(&board_event.event.waveform_data)
+                //     .unwrap();
             }
             Err(RecvTimeoutError::Timeout) => {
                 // If no event is received within the timeout, check if it's time to print.
@@ -556,11 +558,11 @@ fn begin_run(
     print_status("done.", false, false, false);
 
     // Create the appropriate directory for file-writing
-    create_run_dir(config);
+    let run_file = create_run_file(config).unwrap();
 
     // Spawn a dedicated thread to process incoming events and print global stats.
     let event_processing_handle = thread::spawn(move || {
-        event_processing(rx);
+        event_processing(rx, run_file);
     });
 
     Ok((tx, event_processing_handle, board_threads))
@@ -602,14 +604,60 @@ fn print_status(status: &str, clear_screen: bool, move_line: bool, clear_line: b
     stdout.flush().unwrap();
 }
 
-fn create_run_dir(config: &Conf) {
-    let output_dir = format!(
+fn create_run_file(config: &Conf) -> Result<PathBuf> {
+    let mut camp_dir = create_camp_dir(&config).unwrap();
+    let runs: Vec<DirEntry> = std::fs::read_dir(&camp_dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .collect();
+    let max_run = runs
+        .iter()
+        .filter_map(|path| {
+            path.file_name()
+                .to_str() // Get file name (OsStr)
+                .and_then(|filename| {
+                    // Ensure the filename starts with "run"
+                    if let Some(stripped) = filename.strip_prefix("run") {
+                        // Split at '_' and take the first part
+                        let parts: Vec<&str> = stripped.split('_').collect();
+                        parts.first()?.parse::<u32>().ok()
+                    } else {
+                        None
+                    }
+                })
+        })
+        .max();
+
+    if let Some(max) = max_run {
+        let file = format!("run{}_0.h5", max);
+        camp_dir.push(&file);
+        Ok(camp_dir)
+    } else {
+        Ok(camp_dir.join("run0_0.h5"))
+    }
+}
+
+fn create_camp_dir(config: &Conf) -> Result<PathBuf> {
+    let camp_dir = format!(
         "{}/camp{}",
         config.run_settings.output_dir, config.run_settings.campaign_num
     );
-    let path = std::path::Path::new(&output_dir);
-    match std::fs::create_dir(path) {
-        Ok(_) => print_status("created output dir", false, true, false),
-        Err(e) => print_status(&format!("error creating dir: {:?}", e), false, true, false),
+    let path = PathBuf::from(camp_dir);
+    if !std::fs::exists(&path).unwrap() {
+        match std::fs::create_dir_all(&path) {
+            Ok(_) => {
+                print_status("Create campaign directory\n", false, true, false);
+            }
+            Err(e) => {
+                print_status(
+                    &format!("error creating dir: {:?}\n", e),
+                    false,
+                    true,
+                    false,
+                );
+            }
+        }
     }
+
+    Ok(path)
 }
