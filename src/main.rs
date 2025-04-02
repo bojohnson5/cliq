@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Result};
+use clap::Parser;
 use confique::Config;
 use core::str;
 use crossbeam_channel::{unbounded, Receiver, RecvTimeoutError, Sender};
@@ -6,7 +7,7 @@ use crossterm::cursor::{MoveTo, MoveToColumn, MoveToNextLine};
 use crossterm::event::{self, Event, KeyCode};
 use crossterm::execute;
 use crossterm::terminal::{self, Clear, ClearType};
-use hdf5::{Dataset, File};
+use hdf5::{Dataset, File, Group};
 use ndarray::Array2;
 use rust_daq::*;
 use std::fs::DirEntry;
@@ -28,61 +29,125 @@ const EVENT_FORMAT: &str = " \
     ] \
 ";
 
-struct HDF5Writer {
-    dataset: Dataset,
+/// LAr DAQ program
+#[derive(Parser, Debug)]
+struct Args {
+    /// Config file used for data acquisition
+    #[arg(long, short)]
+    pub config: String,
+}
+
+struct BoardData {
     current_event: usize,
     max_events: usize,
+    timestamps: Dataset,
+    waveforms: Dataset,
+}
+
+impl BoardData {
+    fn new(group: &Group, n_channels: usize, n_samples: usize, max_events: usize) -> Result<Self> {
+        // Preallocate a dataset for timestamps (1D)
+        let ts_shape = (max_events, 1);
+        let timestamps = group
+            .new_dataset::<u64>()
+            .shape(ts_shape)
+            .deflate(6)
+            .create("timestamps")?;
+
+        // Preallocate a dataset for waveforms (3D: events x channels x samples)
+        let wf_shape = (max_events, n_channels, n_samples);
+        // Use chunking and deflate compression (for example level 6)
+        let waveforms = group
+            .new_dataset::<u16>()
+            .shape(wf_shape)
+            .chunk((1, n_channels, n_samples))
+            .deflate(6)
+            .create("waveforms")?;
+
+        Ok(Self {
+            current_event: 0,
+            max_events,
+            timestamps,
+            waveforms,
+        })
+    }
+
+    fn append_event(
+        &mut self,
+        timestamp: u64,
+        event_data: &Array2<u16>,
+        n_channels: usize,
+        n_samples: usize,
+    ) -> Result<()> {
+        // Verify dimensions
+        let (channels, samples) = event_data.dim();
+        if channels != n_channels || samples != n_samples {
+            return Err(anyhow!("Event dimensions do not match dataset dimensions",));
+        }
+        if self.current_event >= self.max_events {
+            return Err(anyhow!("Maximum number of events reached"));
+        }
+        // Write timestamp: using write_slice with a 1D offset (current index)
+        self.timestamps
+            .write_slice(&[timestamp], (self.current_event, ..))?;
+        // Write waveform data into the waveform dataset slice at current_event
+        self.waveforms
+            .write_slice(event_data, (self.current_event, .., ..))?;
+        self.current_event += 1;
+
+        Ok(())
+    }
+}
+
+struct HDF5Writer {
+    file: File,
+    board0: BoardData,
+    board1: BoardData,
     n_channels: usize,
     n_samples: usize,
 }
 
 impl HDF5Writer {
-    /// Create a new writer that preallocates a dataset with shape
-    /// (max_events, n_channels, n_samples). Each event is a 2D array.
-    fn new(
-        filename: &str,
-        dataset_name: &str,
-        n_channels: usize,
-        n_samples: usize,
-        max_events: usize,
-    ) -> Result<Self> {
+    fn new(filename: &str, n_channels: usize, n_samples: usize, max_events: usize) -> Result<Self> {
         let file = File::create(filename)?;
 
-        // Preallocate a dataset with a fixed maximum number of events.
-        // For example, shape = (max_events, n_channels, n_samples)
-        let shape = (max_events, n_channels, n_samples);
-        let dataset = file
-            .new_dataset::<u16>()
-            .shape(shape)
-            .create(dataset_name)?;
+        // Create two groups for the two boards.
+        let group1 = file.create_group("board1")?;
+        let group2 = file.create_group("board2")?;
+
+        // Create board-specific datasets.
+        let board0 = BoardData::new(&group1, n_channels, n_samples, max_events)?;
+        let board1 = BoardData::new(&group2, n_channels, n_samples, max_events)?;
 
         Ok(Self {
-            dataset,
-            current_event: 0,
-            max_events,
+            file,
+            board0,
+            board1,
             n_channels,
             n_samples,
         })
     }
 
-    /// Append a new event (a 2D array with shape (n_channels, n_samples))
-    /// into the next available slice of the 3D dataset.
-    fn append_event(&mut self, event_data: &Array2<u16>) -> Result<()> {
-        // Verify that the incoming event data has the correct dimensions.
-        let (channels, samples) = event_data.dim();
-        if channels != self.n_channels || samples != self.n_samples {
-            return Err(anyhow!("Event dimensions do not match dataset dimensions"));
+    /// Append an event to the specified board.
+    ///
+    /// * `board` should be 1 or 2.
+    /// * `timestamp` is the event timestamp.
+    /// * `event_data` is a 2D array of shape (n_channels, n_samples).
+    fn append_event(
+        &mut self,
+        board: usize,
+        timestamp: u64,
+        event_data: &Array2<u16>,
+    ) -> Result<()> {
+        match board {
+            0 => self
+                .board0
+                .append_event(timestamp, event_data, self.n_channels, self.n_samples),
+            1 => self
+                .board1
+                .append_event(timestamp, event_data, self.n_channels, self.n_samples),
+            _ => Err(anyhow!("Invalid board number")),
         }
-        // Check if there is still space in the preallocated dataset.
-        if self.current_event >= self.max_events {
-            return Err(anyhow!("Maximum number of events reached"));
-        }
-        // Write the event data at the slice corresponding to the current event.
-        // Here we assume that hdf5-metno's `write_slice` method accepts a tuple of offsets.
-        self.dataset
-            .write_slice(event_data, (self.current_event, .., ..))?;
-        self.current_event += 1;
-        Ok(())
     }
 }
 
@@ -214,7 +279,8 @@ fn data_taking_thread(
 }
 
 fn main() -> Result<(), FELibReturn> {
-    let config = Conf::from_file("config.toml").map_err(|_| FELibReturn::InvalidParam)?;
+    let args = Args::parse();
+    let config = Conf::from_file(args.config).map_err(|_| FELibReturn::InvalidParam)?;
 
     // List of board connection strings. Add as many as needed.
     let board_urls = vec!["dig2://caendgtz-usb-25380", "dig2://caendgtz-usb-25379"];
@@ -460,8 +526,7 @@ fn event_processing(rx: Receiver<BoardEvent>, run_file: PathBuf) {
     let print_interval = Duration::from_secs(1);
     let mut last_print = Instant::now();
 
-    let mut writer =
-        HDF5Writer::new(run_file.to_str().unwrap(), "waveforms", 64, 4125, 1000).unwrap();
+    let mut writer = HDF5Writer::new(run_file.to_str().unwrap(), 64, 4125, 1000).unwrap();
     loop {
         // Use a blocking recv with timeout to periodically print stats.
         match rx.recv_timeout(Duration::from_millis(100)) {
@@ -469,7 +534,11 @@ fn event_processing(rx: Receiver<BoardEvent>, run_file: PathBuf) {
                 stats.increment(board_event.event.c_event.event_size);
                 // You can also log which board the event came from if needed.
                 writer
-                    .append_event(&board_event.event.waveform_data)
+                    .append_event(
+                        board_event.board_id,
+                        board_event.event.c_event.timestamp,
+                        &board_event.event.waveform_data,
+                    )
                     .unwrap();
             }
             Err(RecvTimeoutError::Timeout) => {
@@ -644,7 +713,7 @@ fn create_run_file(config: &Conf) -> Result<PathBuf> {
         .max();
 
     if let Some(max) = max_run {
-        let file = format!("run{}_0.h5", max);
+        let file = format!("run{}_0.h5", max + 1);
         camp_dir.push(&file);
         Ok(camp_dir)
     } else {
