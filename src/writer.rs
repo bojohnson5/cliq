@@ -93,7 +93,7 @@ impl BoardData {
             .shape(wf_shape)
             // Set chunking and compression if desired.
             .chunk((buffer_capacity, n_channels, n_samples))
-            .deflate(6)
+            // .deflate(3)
             .create("waveforms")?;
 
         // Create the in-memory buffers.

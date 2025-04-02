@@ -290,7 +290,7 @@ fn configure_board(handle: u64, config: &Conf) -> Result<(), FELibReturn> {
         "/par/AcqTriggerSource",
         &config.board_settings.trig_source,
     )?;
-    felib_setvalue(handle, "/par/TestPulsePeriod", "1000000000")?;
+    felib_setvalue(handle, "/par/TestPulsePeriod", "8333333")?;
     felib_setvalue(handle, "/par/TestPulseWidth", "1000")?;
     felib_setvalue(handle, "/par/TestPulseLowLevel", "0")?;
     felib_setvalue(handle, "/par/TestPulseHighLevel", "10000")?;
@@ -361,12 +361,19 @@ fn configure_sync(
     Ok(())
 }
 
-fn event_processing(rx: Receiver<BoardEvent>, run_file: PathBuf) {
+fn event_processing(rx: Receiver<BoardEvent>, run_file: PathBuf, config: Conf) {
     let mut stats = Counter::new();
     let print_interval = Duration::from_secs(1);
     let mut last_print = Instant::now();
 
-    let mut writer = HDF5Writer::new(run_file.to_str().unwrap(), 64, 4125, 1000, 10).unwrap();
+    let mut writer = HDF5Writer::new(
+        run_file.to_str().unwrap(),
+        64,
+        config.board_settings.record_len,
+        100000,
+        50,
+    )
+    .unwrap();
     loop {
         // Use a blocking recv with timeout to periodically print stats.
         match rx.recv_timeout(Duration::from_millis(100)) {
@@ -488,8 +495,9 @@ fn begin_run(
     let run_file = create_run_file(config).unwrap();
 
     // Spawn a dedicated thread to process incoming events and print global stats.
+    let config_clone = config.clone();
     let event_processing_handle = thread::spawn(move || {
-        event_processing(rx, run_file);
+        event_processing(rx, run_file, config_clone);
     });
 
     Ok((tx, event_processing_handle, board_threads))
