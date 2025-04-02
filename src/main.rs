@@ -1,19 +1,13 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use clap::Parser;
 use confique::Config;
 use core::str;
 use crossbeam_channel::{unbounded, Receiver, RecvTimeoutError, Sender};
-use crossterm::cursor::{MoveTo, MoveToColumn, MoveToNextLine};
 use crossterm::event::{self, Event, KeyCode};
-use crossterm::execute;
-use crossterm::terminal::{self, Clear, ClearType};
-use hdf5::{Dataset, File, Group};
-use ndarray::{s, Array2, Array3};
+use crossterm::terminal::{self};
 use rust_daq::*;
-use std::fs::DirEntry;
 use std::path::PathBuf;
 use std::{
-    io::{stdout, Write},
     sync::{Arc, Condvar, Mutex},
     thread::{self, JoinHandle},
     time::{Duration, Instant},
@@ -35,313 +29,6 @@ struct Args {
     /// Config file used for data acquisition
     #[arg(long, short)]
     pub config: String,
-}
-
-/// Holds HDF5 datasets and buffering for one board.
-struct BoardData {
-    current_event: usize,
-    max_events: usize,
-    timestamps: Dataset,
-    waveforms: Dataset,
-    buffer_capacity: usize,
-    buffer_count: usize,
-    ts_buffer: Array2<u64>,
-    wf_buffer: Array3<u16>,
-    n_channels: usize,
-    n_samples: usize,
-}
-
-impl BoardData {
-    fn new(
-        group: &Group,
-        n_channels: usize,
-        n_samples: usize,
-        max_events: usize,
-        buffer_capacity: usize,
-    ) -> Result<Self> {
-        // Create datasets for timestamps and waveforms.
-        // For timestamps we use shape (max_events, 1) to allow writing a 1D slice later.
-        let ts_shape = (max_events, 1);
-        let timestamps = group
-            .new_dataset::<u64>()
-            .shape(ts_shape)
-            .chunk((buffer_capacity, 1))
-            .create("timestamps")?;
-
-        let wf_shape = (max_events, n_channels, n_samples);
-        let waveforms = group
-            .new_dataset::<u16>()
-            .shape(wf_shape)
-            // Set chunking and compression if desired.
-            .chunk((buffer_capacity, n_channels, n_samples))
-            .deflate(6)
-            .create("waveforms")?;
-
-        // Create the in-memory buffers.
-        let ts_buffer = Array2::<u64>::zeros((buffer_capacity, 1));
-        let wf_buffer = Array3::<u16>::zeros((buffer_capacity, n_channels, n_samples));
-
-        Ok(Self {
-            current_event: 0,
-            max_events,
-            timestamps,
-            waveforms,
-            buffer_capacity,
-            buffer_count: 0,
-            ts_buffer,
-            wf_buffer,
-            n_channels,
-            n_samples,
-        })
-    }
-
-    /// Append an event to the board’s buffers. When the buffer fills, flush it to disk.
-    fn append_event(&mut self, timestamp: u64, event_data: &Array2<u16>) -> Result<()> {
-        // Verify that the incoming event has the expected shape.
-        let (channels, samples) = event_data.dim();
-        if channels != self.n_channels || samples != self.n_samples {
-            return Err(anyhow!("Event dimensions do not match dataset dimensions",));
-        }
-        if self.current_event + self.buffer_count >= self.max_events {
-            return Err(anyhow!("Maximum number of events reached"));
-        }
-
-        // Place the new data into the buffers.
-        self.ts_buffer[[self.buffer_count, 0]] = timestamp;
-        // Copy the 2D waveform event into the corresponding slice of the buffer.
-        self.wf_buffer
-            .slice_mut(s![self.buffer_count, .., ..])
-            .assign(event_data);
-        self.buffer_count += 1;
-
-        // Flush the buffers if they've reached capacity.
-        if self.buffer_count == self.buffer_capacity {
-            self.flush()?;
-        }
-
-        Ok(())
-    }
-
-    /// Flush the buffered events to the HDF5 datasets.
-    fn flush(&mut self) -> Result<()> {
-        if self.buffer_count == 0 {
-            return Ok(());
-        }
-
-        // Write the timestamp buffer.
-        // The dataset was created with shape (max_events, 1), so we write a 2D slice.
-        let ts_to_write = self
-            .ts_buffer
-            .slice(s![0..self.buffer_count, ..])
-            .to_owned();
-        self.timestamps.write_slice(
-            &ts_to_write,
-            (
-                self.current_event..self.current_event + self.buffer_count,
-                ..,
-            ),
-        )?;
-
-        // Write the waveform buffer.
-        let wf_to_write = self
-            .wf_buffer
-            .slice(s![0..self.buffer_count, .., ..])
-            .to_owned();
-        self.waveforms.write_slice(
-            &wf_to_write,
-            (
-                self.current_event..self.current_event + self.buffer_count,
-                ..,
-                ..,
-            ),
-        )?;
-
-        // Update the overall event count and reset the buffer.
-        self.current_event += self.buffer_count;
-        self.buffer_count = 0;
-        Ok(())
-    }
-}
-
-/// HDF5Writer creates two groups (one per board) and routes events accordingly.
-struct HDF5Writer {
-    file: File,
-    board0: BoardData,
-    board1: BoardData,
-}
-
-impl HDF5Writer {
-    fn new(
-        filename: &str,
-        n_channels: usize,
-        n_samples: usize,
-        max_events: usize,
-        buffer_capacity: usize,
-    ) -> Result<Self> {
-        let file = File::create(filename)?;
-
-        // Create groups for each board.
-        let group0 = file.create_group("board0")?;
-        let group1 = file.create_group("board1")?;
-
-        // Create BoardData for each board.
-        let board0 = BoardData::new(&group0, n_channels, n_samples, max_events, buffer_capacity)?;
-        let board1 = BoardData::new(&group1, n_channels, n_samples, max_events, buffer_capacity)?;
-
-        Ok(Self {
-            file,
-            board0,
-            board1,
-        })
-    }
-
-    /// Append an event for the specified board (0 or 1) along with its timestamp.
-    fn append_event(
-        &mut self,
-        board: usize,
-        timestamp: u64,
-        event_data: &Array2<u16>,
-    ) -> Result<()> {
-        match board {
-            0 => self.board0.append_event(timestamp, event_data),
-            1 => self.board1.append_event(timestamp, event_data),
-            _ => Err(anyhow!("Invalid board number")),
-        }
-    }
-
-    /// Flush any remaining buffered events for both boards.
-    fn flush_all(&mut self) -> Result<()> {
-        self.board0.flush()?;
-        self.board1.flush()?;
-        Ok(())
-    }
-}
-
-/// Structure representing an event coming from a board.
-#[derive(Debug)]
-#[allow(dead_code)]
-struct BoardEvent {
-    board_id: usize,
-    event: EventWrapper,
-}
-
-/// A helper structure to track statistics.
-#[derive(Clone, Copy, Debug)]
-struct Counter {
-    total_size: usize,
-    n_events: usize,
-    t_begin: Instant,
-}
-
-#[allow(dead_code)]
-impl Counter {
-    fn new() -> Self {
-        Self {
-            total_size: 0,
-            n_events: 0,
-            t_begin: Instant::now(),
-        }
-    }
-
-    fn from(counter: &Self) -> Self {
-        Self {
-            total_size: counter.total_size,
-            n_events: counter.n_events,
-            t_begin: counter.t_begin,
-        }
-    }
-
-    fn increment(&mut self, size: usize) {
-        self.total_size += size;
-        self.n_events += 1;
-    }
-}
-
-/// Prints details for a given board.
-fn print_dig_details(handle: u64) -> Result<(), FELibReturn> {
-    let model = felib_getvalue(handle, "/par/ModelName")?;
-    println!("Model name:\t{model}");
-    let serialnum = felib_getvalue(handle, "/par/SerialNum")?;
-    println!("Serial number:\t{serialnum}");
-    let adc_nbit = felib_getvalue(handle, "/par/ADC_Nbit")?;
-    println!("ADC bits:\t{adc_nbit}");
-    let numch = felib_getvalue(handle, "/par/NumCh")?;
-    println!("Channels:\t{numch}");
-    let samplerate = felib_getvalue(handle, "/par/ADC_SamplRate")?;
-    println!("ADC rate:\t{samplerate}");
-    let cupver = felib_getvalue(handle, "/par/cupver")?;
-    println!("CUP version:\t{cupver}");
-    Ok(())
-}
-
-/// Data-taking thread function for one board.
-/// It configures the endpoint, signals that configuration is complete,
-/// waits for the shared acquisition start signal, then continuously reads events and sends them.
-fn data_taking_thread(
-    board_id: usize,
-    dev_handle: u64,
-    config: Conf,
-    tx: Sender<BoardEvent>,
-    acq_start: Arc<(Mutex<bool>, Condvar)>,
-    endpoint_configured: Arc<(Mutex<u32>, Condvar)>,
-) -> Result<(), FELibReturn> {
-    // Set up endpoint.
-    let mut ep_handle = 0;
-    let mut ep_folder_handle = 0;
-    felib_gethandle(dev_handle, "/endpoint/scope", &mut ep_handle)?;
-    felib_getparenthandle(ep_handle, "", &mut ep_folder_handle)?;
-    felib_setvalue(ep_folder_handle, "/par/activeendpoint", "scope")?;
-    felib_setreaddataformat(ep_handle, EVENT_FORMAT)?;
-    felib_sendcommand(dev_handle, "/cmd/armacquisition")?;
-
-    // Signal that this board's endpoint is configured.
-    {
-        let (lock, cond) = &*endpoint_configured;
-        let mut count = lock.lock().unwrap();
-        *count += 1;
-        cond.notify_all();
-    }
-
-    // Wait for the acquisition start signal.
-    {
-        let (lock, cvar) = &*acq_start;
-        let mut started = lock.lock().unwrap();
-        while !*started {
-            started = cvar.wait(started).unwrap();
-        }
-    }
-
-    // Data-taking loop.
-    // num_ch has to be 64 due to the way CAEN reads data from the board
-    let num_ch = 64;
-    let waveform_len = config.board_settings.record_len;
-    let mut event = EventWrapper::new(num_ch, waveform_len);
-    loop {
-        let ret = felib_readdata(ep_handle, &mut event);
-        match ret {
-            FELibReturn::Success => {
-                // Instead of allocating a new EventWrapper,
-                // swap out the current one using std::mem::replace.
-                let board_event = BoardEvent {
-                    board_id,
-                    event: std::mem::replace(&mut event, EventWrapper::new(num_ch, waveform_len)),
-                };
-                tx.send(board_event).expect("Failed to send event");
-            }
-            FELibReturn::Timeout => continue,
-            FELibReturn::Stop => {
-                print_status(
-                    &format!("Board {}: Stop received...\n", board_id),
-                    false,
-                    true,
-                    false,
-                );
-                break;
-            }
-            _ => (),
-        }
-    }
-    Ok(())
 }
 
 fn main() -> Result<(), FELibReturn> {
@@ -448,6 +135,93 @@ fn main() -> Result<(), FELibReturn> {
 
     println!("\nTTFN!");
 
+    Ok(())
+}
+
+/// Prints details for a given board.
+fn print_dig_details(handle: u64) -> Result<(), FELibReturn> {
+    let model = felib_getvalue(handle, "/par/ModelName")?;
+    println!("Model name:\t{model}");
+    let serialnum = felib_getvalue(handle, "/par/SerialNum")?;
+    println!("Serial number:\t{serialnum}");
+    let adc_nbit = felib_getvalue(handle, "/par/ADC_Nbit")?;
+    println!("ADC bits:\t{adc_nbit}");
+    let numch = felib_getvalue(handle, "/par/NumCh")?;
+    println!("Channels:\t{numch}");
+    let samplerate = felib_getvalue(handle, "/par/ADC_SamplRate")?;
+    println!("ADC rate:\t{samplerate}");
+    let cupver = felib_getvalue(handle, "/par/cupver")?;
+    println!("CUP version:\t{cupver}");
+    Ok(())
+}
+
+/// Data-taking thread function for one board.
+/// It configures the endpoint, signals that configuration is complete,
+/// waits for the shared acquisition start signal, then continuously reads events and sends them.
+fn data_taking_thread(
+    board_id: usize,
+    dev_handle: u64,
+    config: Conf,
+    tx: Sender<BoardEvent>,
+    acq_start: Arc<(Mutex<bool>, Condvar)>,
+    endpoint_configured: Arc<(Mutex<u32>, Condvar)>,
+) -> Result<(), FELibReturn> {
+    // Set up endpoint.
+    let mut ep_handle = 0;
+    let mut ep_folder_handle = 0;
+    felib_gethandle(dev_handle, "/endpoint/scope", &mut ep_handle)?;
+    felib_getparenthandle(ep_handle, "", &mut ep_folder_handle)?;
+    felib_setvalue(ep_folder_handle, "/par/activeendpoint", "scope")?;
+    felib_setreaddataformat(ep_handle, EVENT_FORMAT)?;
+    felib_sendcommand(dev_handle, "/cmd/armacquisition")?;
+
+    // Signal that this board's endpoint is configured.
+    {
+        let (lock, cond) = &*endpoint_configured;
+        let mut count = lock.lock().unwrap();
+        *count += 1;
+        cond.notify_all();
+    }
+
+    // Wait for the acquisition start signal.
+    {
+        let (lock, cvar) = &*acq_start;
+        let mut started = lock.lock().unwrap();
+        while !*started {
+            started = cvar.wait(started).unwrap();
+        }
+    }
+
+    // Data-taking loop.
+    // num_ch has to be 64 due to the way CAEN reads data from the board
+    let num_ch = 64;
+    let waveform_len = config.board_settings.record_len;
+    let mut event = EventWrapper::new(num_ch, waveform_len);
+    loop {
+        let ret = felib_readdata(ep_handle, &mut event);
+        match ret {
+            FELibReturn::Success => {
+                // Instead of allocating a new EventWrapper,
+                // swap out the current one using std::mem::replace.
+                let board_event = BoardEvent {
+                    board_id,
+                    event: std::mem::replace(&mut event, EventWrapper::new(num_ch, waveform_len)),
+                };
+                tx.send(board_event).expect("Failed to send event");
+            }
+            FELibReturn::Timeout => continue,
+            FELibReturn::Stop => {
+                print_status(
+                    &format!("Board {}: Stop received...\n", board_id),
+                    false,
+                    true,
+                    false,
+                );
+                break;
+            }
+            _ => (),
+        }
+    }
     Ok(())
 }
 
@@ -740,77 +514,4 @@ fn input_thread(tx: Sender<char>) {
         }
         terminal::disable_raw_mode().expect("Failed to disable raw mode");
     });
-}
-
-fn print_status(status: &str, clear_screen: bool, move_line: bool, clear_line: bool) {
-    let mut stdout = stdout();
-    if clear_screen {
-        execute!(stdout, Clear(ClearType::All), MoveTo(0, 0)).unwrap();
-    }
-    if move_line {
-        execute!(stdout, MoveToNextLine(1)).unwrap();
-    }
-    if clear_line {
-        execute!(stdout, Clear(ClearType::CurrentLine), MoveToColumn(0)).unwrap();
-    }
-    write!(stdout, "{}", status).unwrap();
-    stdout.flush().unwrap();
-}
-
-fn create_run_file(config: &Conf) -> Result<PathBuf> {
-    let mut camp_dir = create_camp_dir(&config).unwrap();
-    let runs: Vec<DirEntry> = std::fs::read_dir(&camp_dir)
-        .unwrap()
-        .filter_map(|e| e.ok())
-        .collect();
-    let max_run = runs
-        .iter()
-        .filter_map(|path| {
-            path.file_name()
-                .to_str() // Get file name (OsStr)
-                .and_then(|filename| {
-                    // Ensure the filename starts with "run"
-                    if let Some(stripped) = filename.strip_prefix("run") {
-                        // Split at '_' and take the first part
-                        let parts: Vec<&str> = stripped.split('_').collect();
-                        parts.first()?.parse::<u32>().ok()
-                    } else {
-                        None
-                    }
-                })
-        })
-        .max();
-
-    if let Some(max) = max_run {
-        let file = format!("run{}_0.h5", max + 1);
-        camp_dir.push(&file);
-        Ok(camp_dir)
-    } else {
-        Ok(camp_dir.join("run0_0.h5"))
-    }
-}
-
-fn create_camp_dir(config: &Conf) -> Result<PathBuf> {
-    let camp_dir = format!(
-        "{}/camp{}",
-        config.run_settings.output_dir, config.run_settings.campaign_num
-    );
-    let path = PathBuf::from(camp_dir);
-    if !std::fs::exists(&path).unwrap() {
-        match std::fs::create_dir_all(&path) {
-            Ok(_) => {
-                print_status("Create campaign directory\n", false, true, false);
-            }
-            Err(e) => {
-                print_status(
-                    &format!("error creating dir: {:?}\n", e),
-                    false,
-                    true,
-                    false,
-                );
-            }
-        }
-    }
-
-    Ok(path)
 }
