@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use hdf5::{Dataset, File, Group};
+use hdf5::{filters::blosc_set_nthreads, Dataset, File, Group};
 use ndarray::{s, Array2, Array3};
 
 /// HDF5Writer creates two groups (one per board) and routes events accordingly.
@@ -18,6 +18,7 @@ impl HDF5Writer {
         buffer_capacity: usize,
     ) -> Result<Self> {
         let file = File::create(filename)?;
+        blosc_set_nthreads(20);
 
         // Create groups for each board.
         let group0 = file.create_group("board0")?;
@@ -84,6 +85,7 @@ impl BoardData {
         let timestamps = group
             .new_dataset::<u64>()
             .shape(ts_shape)
+            .blosc_zstd(3, true)
             .chunk((buffer_capacity, 1))
             .create("timestamps")?;
 
@@ -92,6 +94,7 @@ impl BoardData {
             .new_dataset::<u16>()
             .shape(wf_shape)
             // Set chunking and compression if desired.
+            .blosc_zstd(3, true)
             .chunk((buffer_capacity, n_channels, n_samples))
             // .deflate(3)
             .create("waveforms")?;
