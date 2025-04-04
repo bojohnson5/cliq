@@ -363,17 +363,11 @@ fn configure_sync(
 
 fn event_processing(rx: Receiver<BoardEvent>, run_file: PathBuf, config: Conf) {
     let mut stats = Counter::new();
-    let print_interval = Duration::from_secs(1);
+    let print_interval = Duration::from_secs(5);
     let mut last_print = Instant::now();
 
-    let mut writer = HDF5Writer::new(
-        run_file.to_str().unwrap(),
-        64,
-        config.board_settings.record_len,
-        100000,
-        50,
-    )
-    .unwrap();
+    let mut writer =
+        HDF5Writer::new(run_file, 64, config.board_settings.record_len, 100000, 50).unwrap();
     loop {
         // Use a blocking recv with timeout to periodically print stats.
         match rx.recv_timeout(Duration::from_millis(100)) {
