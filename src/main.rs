@@ -1,17 +1,13 @@
+use anyhow::Result;
+use clap::Parser;
 use confique::Config;
 use core::str;
 use crossbeam_channel::{unbounded, Receiver, RecvTimeoutError, Sender};
-use crossterm::cursor::{MoveToColumn, MoveToNextLine};
 use crossterm::event::{self, Event, KeyCode};
-use crossterm::terminal;
-use crossterm::{
-    cursor::MoveTo,
-    execute,
-    terminal::{Clear, ClearType},
-};
+use crossterm::terminal::{self};
 use rust_daq::*;
+use std::path::PathBuf;
 use std::{
-    io::{stdout, Write},
     sync::{Arc, Condvar, Mutex},
     thread::{self, JoinHandle},
     time::{Duration, Instant},
@@ -27,135 +23,17 @@ const EVENT_FORMAT: &str = " \
     ] \
 ";
 
-/// Structure representing an event coming from a board.
-#[derive(Debug)]
-#[allow(dead_code)]
-struct BoardEvent {
-    board_id: usize,
-    event: EventWrapper,
-}
-
-/// A helper structure to track statistics.
-#[derive(Clone, Copy, Debug)]
-struct Counter {
-    total_size: usize,
-    n_events: usize,
-    t_begin: Instant,
-}
-
-#[allow(dead_code)]
-impl Counter {
-    fn new() -> Self {
-        Self {
-            total_size: 0,
-            n_events: 0,
-            t_begin: Instant::now(),
-        }
-    }
-
-    fn from(counter: &Self) -> Self {
-        Self {
-            total_size: counter.total_size,
-            n_events: counter.n_events,
-            t_begin: counter.t_begin,
-        }
-    }
-
-    fn increment(&mut self, size: usize) {
-        self.total_size += size;
-        self.n_events += 1;
-    }
-}
-
-/// Prints details for a given board.
-fn print_dig_details(handle: u64) -> Result<(), FELibReturn> {
-    let model = felib_getvalue(handle, "/par/ModelName")?;
-    println!("Model name:\t{model}");
-    let serialnum = felib_getvalue(handle, "/par/SerialNum")?;
-    println!("Serial number:\t{serialnum}");
-    let adc_nbit = felib_getvalue(handle, "/par/ADC_Nbit")?;
-    println!("ADC bits:\t{adc_nbit}");
-    let numch = felib_getvalue(handle, "/par/NumCh")?;
-    println!("Channels:\t{numch}");
-    let samplerate = felib_getvalue(handle, "/par/ADC_SamplRate")?;
-    println!("ADC rate:\t{samplerate}");
-    let cupver = felib_getvalue(handle, "/par/cupver")?;
-    println!("CUP version:\t{cupver}");
-    Ok(())
-}
-
-/// Data-taking thread function for one board.
-/// It configures the endpoint, signals that configuration is complete,
-/// waits for the shared acquisition start signal, then continuously reads events and sends them.
-fn data_taking_thread(
-    board_id: usize,
-    dev_handle: u64,
-    config: Conf,
-    tx: Sender<BoardEvent>,
-    acq_start: Arc<(Mutex<bool>, Condvar)>,
-    endpoint_configured: Arc<(Mutex<u32>, Condvar)>,
-) -> Result<(), FELibReturn> {
-    // Set up endpoint.
-    let mut ep_handle = 0;
-    let mut ep_folder_handle = 0;
-    felib_gethandle(dev_handle, "/endpoint/scope", &mut ep_handle)?;
-    felib_getparenthandle(ep_handle, "", &mut ep_folder_handle)?;
-    felib_setvalue(ep_folder_handle, "/par/activeendpoint", "scope")?;
-    felib_setreaddataformat(ep_handle, EVENT_FORMAT)?;
-    felib_sendcommand(dev_handle, "/cmd/armacquisition")?;
-
-    // Signal that this board's endpoint is configured.
-    {
-        let (lock, cond) = &*endpoint_configured;
-        let mut count = lock.lock().unwrap();
-        *count += 1;
-        cond.notify_all();
-    }
-
-    // Wait for the acquisition start signal.
-    {
-        let (lock, cvar) = &*acq_start;
-        let mut started = lock.lock().unwrap();
-        while !*started {
-            started = cvar.wait(started).unwrap();
-        }
-    }
-
-    // Data-taking loop.
-    // num_ch has to be 64 due to the way CAEN reads data from the board
-    let num_ch = 64;
-    let waveform_len = config.board_settings.record_len;
-    let mut event = EventWrapper::new(num_ch, waveform_len);
-    loop {
-        let ret = felib_readdata(ep_handle, &mut event);
-        match ret {
-            FELibReturn::Success => {
-                // Instead of allocating a new EventWrapper,
-                // swap out the current one using std::mem::replace.
-                let board_event = BoardEvent {
-                    board_id,
-                    event: std::mem::replace(&mut event, EventWrapper::new(num_ch, waveform_len)),
-                };
-                tx.send(board_event).expect("Failed to send event");
-            }
-            FELibReturn::Timeout => continue,
-            FELibReturn::Stop => {
-                print_status(
-                    &format!("Board {}: Stop received...", board_id),
-                    false,
-                    true,
-                    false,
-                );
-                break;
-            }
-            _ => (),
-        }
-    }
-    Ok(())
+/// LAr DAQ program
+#[derive(Parser, Debug)]
+struct Args {
+    /// Config file used for data acquisition
+    #[arg(long, short)]
+    pub config: String,
 }
 
 fn main() -> Result<(), FELibReturn> {
-    let config = Conf::from_file("config.toml").map_err(|_| FELibReturn::InvalidParam)?;
+    let args = Args::parse();
+    let config = Conf::from_file(args.config).map_err(|_| FELibReturn::InvalidParam)?;
 
     // List of board connection strings. Add as many as needed.
     let board_urls = vec!["dig2://caendgtz-usb-25380", "dig2://caendgtz-usb-25379"];
@@ -257,6 +135,93 @@ fn main() -> Result<(), FELibReturn> {
 
     println!("\nTTFN!");
 
+    Ok(())
+}
+
+/// Prints details for a given board.
+fn print_dig_details(handle: u64) -> Result<(), FELibReturn> {
+    let model = felib_getvalue(handle, "/par/ModelName")?;
+    println!("Model name:\t{model}");
+    let serialnum = felib_getvalue(handle, "/par/SerialNum")?;
+    println!("Serial number:\t{serialnum}");
+    let adc_nbit = felib_getvalue(handle, "/par/ADC_Nbit")?;
+    println!("ADC bits:\t{adc_nbit}");
+    let numch = felib_getvalue(handle, "/par/NumCh")?;
+    println!("Channels:\t{numch}");
+    let samplerate = felib_getvalue(handle, "/par/ADC_SamplRate")?;
+    println!("ADC rate:\t{samplerate}");
+    let cupver = felib_getvalue(handle, "/par/cupver")?;
+    println!("CUP version:\t{cupver}");
+    Ok(())
+}
+
+/// Data-taking thread function for one board.
+/// It configures the endpoint, signals that configuration is complete,
+/// waits for the shared acquisition start signal, then continuously reads events and sends them.
+fn data_taking_thread(
+    board_id: usize,
+    dev_handle: u64,
+    config: Conf,
+    tx: Sender<BoardEvent>,
+    acq_start: Arc<(Mutex<bool>, Condvar)>,
+    endpoint_configured: Arc<(Mutex<u32>, Condvar)>,
+) -> Result<(), FELibReturn> {
+    // Set up endpoint.
+    let mut ep_handle = 0;
+    let mut ep_folder_handle = 0;
+    felib_gethandle(dev_handle, "/endpoint/scope", &mut ep_handle)?;
+    felib_getparenthandle(ep_handle, "", &mut ep_folder_handle)?;
+    felib_setvalue(ep_folder_handle, "/par/activeendpoint", "scope")?;
+    felib_setreaddataformat(ep_handle, EVENT_FORMAT)?;
+    felib_sendcommand(dev_handle, "/cmd/armacquisition")?;
+
+    // Signal that this board's endpoint is configured.
+    {
+        let (lock, cond) = &*endpoint_configured;
+        let mut count = lock.lock().unwrap();
+        *count += 1;
+        cond.notify_all();
+    }
+
+    // Wait for the acquisition start signal.
+    {
+        let (lock, cvar) = &*acq_start;
+        let mut started = lock.lock().unwrap();
+        while !*started {
+            started = cvar.wait(started).unwrap();
+        }
+    }
+
+    // Data-taking loop.
+    // num_ch has to be 64 due to the way CAEN reads data from the board
+    let num_ch = 64;
+    let waveform_len = config.board_settings.record_len;
+    let mut event = EventWrapper::new(num_ch, waveform_len);
+    loop {
+        let ret = felib_readdata(ep_handle, &mut event);
+        match ret {
+            FELibReturn::Success => {
+                // Instead of allocating a new EventWrapper,
+                // swap out the current one using std::mem::replace.
+                let board_event = BoardEvent {
+                    board_id,
+                    event: std::mem::replace(&mut event, EventWrapper::new(num_ch, waveform_len)),
+                };
+                tx.send(board_event).expect("Failed to send event");
+            }
+            FELibReturn::Timeout => continue,
+            FELibReturn::Stop => {
+                print_status(
+                    &format!("Board {}: Stop received...\n", board_id),
+                    false,
+                    true,
+                    false,
+                );
+                break;
+            }
+            _ => (),
+        }
+    }
     Ok(())
 }
 
@@ -396,22 +361,40 @@ fn configure_sync(
     Ok(())
 }
 
-fn event_processing(rx: Receiver<BoardEvent>) {
+fn event_processing(rx: Receiver<BoardEvent>, run_file: PathBuf, config: Conf) {
     let mut stats = Counter::new();
     let print_interval = Duration::from_secs(1);
     let mut last_print = Instant::now();
 
+    let mut writer = HDF5Writer::new(
+        run_file.to_str().unwrap(),
+        64,
+        config.board_settings.record_len,
+        100000,
+        50,
+    )
+    .unwrap();
     loop {
         // Use a blocking recv with timeout to periodically print stats.
         match rx.recv_timeout(Duration::from_millis(100)) {
             Ok(board_event) => {
                 stats.increment(board_event.event.c_event.event_size);
                 // You can also log which board the event came from if needed.
+                writer
+                    .append_event(
+                        board_event.board_id,
+                        board_event.event.c_event.timestamp,
+                        &board_event.event.waveform_data,
+                    )
+                    .unwrap();
             }
             Err(RecvTimeoutError::Timeout) => {
                 // If no event is received within the timeout, check if it's time to print.
             }
-            Err(RecvTimeoutError::Disconnected) => break,
+            Err(RecvTimeoutError::Disconnected) => {
+                writer.flush_all().unwrap();
+                break;
+            }
         }
         if last_print.elapsed() >= print_interval {
             print_status(
@@ -508,9 +491,13 @@ fn begin_run(
     felib_sendcommand(boards[0].1, "/cmd/swstartacquisition")?;
     print_status("done.", false, false, false);
 
+    // Create the appropriate directory for file-writing
+    let run_file = create_run_file(config).unwrap();
+
     // Spawn a dedicated thread to process incoming events and print global stats.
+    let config_clone = config.clone();
     let event_processing_handle = thread::spawn(move || {
-        event_processing(rx);
+        event_processing(rx, run_file, config_clone);
     });
 
     Ok((tx, event_processing_handle, board_threads))
@@ -535,19 +522,4 @@ fn input_thread(tx: Sender<char>) {
         }
         terminal::disable_raw_mode().expect("Failed to disable raw mode");
     });
-}
-
-fn print_status(status: &str, clear_screen: bool, move_line: bool, clear_line: bool) {
-    let mut stdout = stdout();
-    if clear_screen {
-        execute!(stdout, Clear(ClearType::All), MoveTo(0, 0)).unwrap();
-    }
-    if move_line {
-        execute!(stdout, MoveToNextLine(1)).unwrap();
-    }
-    if clear_line {
-        execute!(stdout, Clear(ClearType::CurrentLine), MoveToColumn(0)).unwrap();
-    }
-    write!(stdout, "{}", status).unwrap();
-    stdout.flush().unwrap();
 }
