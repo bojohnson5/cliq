@@ -29,11 +29,14 @@ struct Args {
     /// Config file used for data acquisition
     #[arg(long, short)]
     pub config: String,
+    /// Optional number of runs if indefinite isn't desired
+    runs: Option<usize>,
 }
 
 fn main() -> Result<(), FELibReturn> {
     let args = Args::parse();
     let config = Conf::from_file(args.config).map_err(|_| FELibReturn::InvalidParam)?;
+    let max_run = if let Some(num) = args.runs { num } else { 0 };
 
     // List of board connection strings. Add as many as needed.
     let board_urls = vec!["dig2://caendgtz-usb-25380", "dig2://caendgtz-usb-25379"];
@@ -73,7 +76,8 @@ fn main() -> Result<(), FELibReturn> {
 
     // Spawn a dedicated thread to listen for user input.
     input_thread(tx_user);
-    while !quit {
+    let mut curr_run = 0;
+    while !quit || curr_run < max_run {
         let timeout_duration = Duration::from_secs(config.run_settings.run_duration);
         let (tx, event_processing_handle, board_threads) = begin_run(&config, &boards)?;
 
@@ -125,6 +129,8 @@ fn main() -> Result<(), FELibReturn> {
             }
             _ => (),
         }
+
+        curr_run += 1;
     }
 
     terminal::disable_raw_mode().expect("Failed to disable raw mode");
