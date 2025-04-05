@@ -3,11 +3,21 @@ use clap::Parser;
 use confique::Config;
 use core::str;
 use crossbeam_channel::{unbounded, Receiver, RecvTimeoutError, Sender};
-use crossterm::event::{self, Event, KeyCode};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use crossterm::terminal::{self};
+use ratatui::{
+    buffer::Buffer,
+    layout::Rect,
+    style::Stylize,
+    symbols::border,
+    text::{Line, Text},
+    widgets::{Block, Paragraph, Widget},
+    DefaultTerminal, Frame,
+};
 use rust_daq::*;
 use std::path::PathBuf;
 use std::{
+    io,
     sync::{Arc, Condvar, Mutex},
     thread::{self, JoinHandle},
     time::{Duration, Instant},
@@ -33,7 +43,7 @@ struct Args {
     runs: Option<usize>,
 }
 
-fn main() -> Result<(), FELibReturn> {
+fn main() -> Result<()> {
     let args = Args::parse();
     let config = Conf::from_file(args.config).map_err(|_| FELibReturn::InvalidParam)?;
     let max_run = if let Some(num) = args.runs { num } else { 0 };
@@ -77,10 +87,11 @@ fn main() -> Result<(), FELibReturn> {
     // Spawn a dedicated thread to listen for user input.
     input_thread(tx_user);
     let mut curr_run = 0;
-    while !quit || curr_run < max_run {
+    while !quit {
         let timeout_duration = Duration::from_secs(config.run_settings.run_duration);
         let (tx, event_processing_handle, board_threads) = begin_run(&config, &boards)?;
 
+        curr_run += 1;
         match rx_user.recv_timeout(timeout_duration) {
             Ok(c) => match c {
                 's' => {
@@ -95,7 +106,7 @@ fn main() -> Result<(), FELibReturn> {
                     // Wait for the input, event processing, and board threads to finish.
                     event_processing_handle
                         .join()
-                        .expect("Event processing thread panicked");
+                        .expect("Event processing thread panicked")?;
                     for handle in board_threads {
                         handle.join().expect("A board thread panicked");
                     }
@@ -111,7 +122,12 @@ fn main() -> Result<(), FELibReturn> {
                 }
             },
             Err(RecvTimeoutError::Timeout) => {
-                print_status("Ending run...", false, true, false);
+                if curr_run == max_run && max_run != 0 {
+                    print_status("Quitting DAQ...", false, true, false);
+                    quit = true;
+                } else {
+                    print_status("Ending run...", false, true, false);
+                }
                 // Stop acquisition on all boards.
                 for &(_, dev_handle) in &boards {
                     felib_sendcommand(dev_handle, "/cmd/disarmacquisition")?;
@@ -122,15 +138,13 @@ fn main() -> Result<(), FELibReturn> {
                 // Wait for the input, event processing, and board threads to finish.
                 event_processing_handle
                     .join()
-                    .expect("Event processing thread panicked");
+                    .expect("Event processing thread panicked")?;
                 for handle in board_threads {
                     handle.join().expect("A board thread panicked");
                 }
             }
             _ => (),
         }
-
-        curr_run += 1;
     }
 
     terminal::disable_raw_mode().expect("Failed to disable raw mode");
@@ -367,13 +381,99 @@ fn configure_sync(
     Ok(())
 }
 
-fn event_processing(rx: Receiver<BoardEvent>, run_file: PathBuf, config: Conf) {
+#[derive(Debug, Default)]
+struct Status {
+    counter: Counter,
+    queue_rate: isize,
+    board0_lost: String,
+    board1_lost: String,
+    exit: bool,
+}
+
+impl Status {
+    pub fn run(&mut self, terminal: &mut DefaultTerminal) -> Result<()> {
+        while !self.exit {
+            terminal.draw(|frame| self.draw(frame))?;
+            self.handle_events()?;
+        }
+        Ok(())
+    }
+
+    fn draw(&self, frame: &mut Frame) {
+        frame.render_widget(self, frame.area());
+    }
+
+    fn handle_events(&mut self) -> Result<()> {
+        match event::read()? {
+            Event::Key(key_event) if key_event.kind == KeyEventKind::Press => {
+                self.handle_key_event(key_event)
+            }
+            _ => {}
+        };
+        Ok(())
+    }
+
+    fn handle_key_event(&mut self, key_event: KeyEvent) {
+        match key_event.code {
+            KeyCode::Char('q') => self.exit(),
+            _ => {}
+        }
+    }
+
+    fn exit(&mut self) {
+        self.exit = true;
+    }
+}
+
+impl Widget for &Status {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        let title = Line::from(" Run Status ".bold());
+        let instructrions = Line::from(vec![" Quit ".into(), "<Q> ".blue().bold()]);
+        let block = Block::bordered()
+            .title(title.centered())
+            .title_bottom(instructrions.centered())
+            .border_set(border::THICK);
+
+        let status_text = Text::from(vec![Line::from(vec![
+            "Elapsed time: ".into(),
+            self.counter
+                .t_begin
+                .elapsed()
+                .as_secs()
+                .to_string()
+                .yellow(),
+            " s".into(),
+            " Events: ".into(),
+            self.counter.n_events.to_string().yellow(),
+            " Data rate: ".into(),
+            self.counter.rate().to_string().yellow(),
+            " MB/s ".into(),
+        ])]);
+
+        Paragraph::new(status_text)
+            .centered()
+            .block(block)
+            .render(area, buf);
+    }
+}
+
+fn event_processing(
+    rx: Receiver<BoardEvent>,
+    run_file: PathBuf,
+    config: Conf,
+    boards: Vec<(usize, u64)>,
+) -> Result<()> {
     let mut stats = Counter::new();
-    let print_interval = Duration::from_secs(5);
+    let print_interval = Duration::from_secs(1);
     let mut last_print = Instant::now();
 
+    let mut terminal = ratatui::init();
+    let status = Status::default().run(&mut terminal);
+
+    let board_handles: Vec<u64> = boards.iter().map(|(_, h)| *h).collect();
+    let mut prev_len = 0;
     let mut writer =
-        HDF5Writer::new(run_file, 64, config.board_settings.record_len, 100000, 50).unwrap();
+        HDF5Writer::new(run_file, 64, config.board_settings.record_len, 7500, 50).unwrap();
     loop {
         // Use a blocking recv with timeout to periodically print stats.
         match rx.recv_timeout(Duration::from_millis(100)) {
@@ -397,21 +497,24 @@ fn event_processing(rx: Receiver<BoardEvent>, run_file: PathBuf, config: Conf) {
             }
         }
         if last_print.elapsed() >= print_interval {
+            let lost_trig0 = felib_getvalue(board_handles[0], "/par/LostTriggerCnt")?;
+            let lost_trig1 = felib_getvalue(board_handles[1], "/par/LostTriggerCnt")?;
             print_status(
                 &format!(
-                    // "\x1b[1K\rElapsed time: {} s\tEvents: {}\tData rate: {:.3} MB/s",
-                    "Elapsed time: {} s\tEvents: {}\tData rate: {:.3} MB/s\tIn queue: {}",
+                    "Elapsed time: {} s\tEvents: {}\tData rate: {:.3} MB/s\tQueue rate: {} /s\nBoard 0 lost triggers: {}\tBoard 1 lost triggers: {}",
                     stats.t_begin.elapsed().as_secs(),
                     stats.n_events,
                     (stats.total_size as f64)
                         / stats.t_begin.elapsed().as_secs_f64()
                         / (1024.0 * 1024.0),
-                    rx.len(),
+                    rx.len() as isize - prev_len,
+                    lost_trig0, lost_trig1,
                 ),
                 false,
                 false,
                 true,
             );
+            prev_len = rx.len() as isize;
             last_print = Instant::now();
         }
     }
@@ -427,12 +530,18 @@ fn event_processing(rx: Receiver<BoardEvent>, run_file: PathBuf, config: Conf) {
         false,
         true,
     );
+
+    Ok(())
 }
 
 fn begin_run(
     config: &Conf,
     boards: &Vec<(usize, u64)>,
-) -> Result<(Sender<BoardEvent>, JoinHandle<()>, Vec<JoinHandle<()>>), FELibReturn> {
+) -> Result<(
+    Sender<BoardEvent>,
+    JoinHandle<Result<()>>,
+    Vec<JoinHandle<()>>,
+)> {
     print_status("Beginning new run", true, true, false);
     print_status("Press [s] to stop data acquisition", false, true, false);
     // Shared signal for acquisition start.
@@ -496,8 +605,10 @@ fn begin_run(
 
     // Spawn a dedicated thread to process incoming events and print global stats.
     let config_clone = config.clone();
-    let event_processing_handle = thread::spawn(move || {
-        event_processing(rx, run_file, config_clone);
+    let boards_clone = boards.clone();
+    let event_processing_handle = thread::spawn(move || -> Result<()> {
+        event_processing(rx, run_file, config_clone, boards_clone)?;
+        Ok(())
     });
 
     Ok((tx, event_processing_handle, board_threads))

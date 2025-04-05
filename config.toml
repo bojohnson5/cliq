@@ -1,6 +1,6 @@
 [run_settings]
 # run duration in seconds
-run_duration = 15
+run_duration = 60
 output_dir = "/home/lardaq/Documents/testing"
 campaign_num = 0
 

@@ -53,6 +53,14 @@ impl From<i32> for FELibReturn {
     }
 }
 
+impl std::fmt::Display for FELibReturn {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self)
+    }
+}
+
+impl std::error::Error for FELibReturn {}
+
 pub fn felib_getlibinfo() -> Result<String, FELibReturn> {
     let buffer_size = 1024;
     let mut buffer = vec![0u8; buffer_size];
