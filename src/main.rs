@@ -381,13 +381,11 @@ fn configure_sync(
     Ok(())
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct Status {
     counter: Counter,
-    queue_rate: isize,
-    board0_lost: String,
-    board1_lost: String,
     exit: bool,
+    rx: Receiver<usize>,
 }
 
 impl Status {
@@ -395,8 +393,18 @@ impl Status {
         while !self.exit {
             terminal.draw(|frame| self.draw(frame))?;
             self.handle_events()?;
+            let event_size = self.rx.recv_timeout(Duration::from_millis(100))?;
+            self.counter.increment(event_size);
         }
         Ok(())
+    }
+
+    pub fn new(rx: Receiver<usize>) -> Self {
+        Self {
+            counter: Counter::default(),
+            exit: false,
+            rx,
+        }
     }
 
     fn draw(&self, frame: &mut Frame) {
@@ -468,7 +476,8 @@ fn event_processing(
     let mut last_print = Instant::now();
 
     let mut terminal = ratatui::init();
-    let status = Status::default().run(&mut terminal);
+    let (tx_user, rx_user) = unbounded();
+    let status = Status::new(rx_user).run(&mut terminal);
 
     let board_handles: Vec<u64> = boards.iter().map(|(_, h)| *h).collect();
     let mut prev_len = 0;
@@ -479,6 +488,9 @@ fn event_processing(
         match rx.recv_timeout(Duration::from_millis(100)) {
             Ok(board_event) => {
                 stats.increment(board_event.event.c_event.event_size);
+                tx_user
+                    .send(board_event.event.c_event.event_size)
+                    .expect("couldn't send event size");
                 // You can also log which board the event came from if needed.
                 writer
                     .append_event(
@@ -496,42 +508,11 @@ fn event_processing(
                 break;
             }
         }
-        if last_print.elapsed() >= print_interval {
-            let lost_trig0 = felib_getvalue(board_handles[0], "/par/LostTriggerCnt")?;
-            let lost_trig1 = felib_getvalue(board_handles[1], "/par/LostTriggerCnt")?;
-            print_status(
-                &format!(
-                    "Elapsed time: {} s\tEvents: {}\tData rate: {:.3} MB/s\tQueue rate: {} /s\nBoard 0 lost triggers: {}\tBoard 1 lost triggers: {}",
-                    stats.t_begin.elapsed().as_secs(),
-                    stats.n_events,
-                    (stats.total_size as f64)
-                        / stats.t_begin.elapsed().as_secs_f64()
-                        / (1024.0 * 1024.0),
-                    rx.len() as isize - prev_len,
-                    lost_trig0, lost_trig1,
-                ),
-                false,
-                false,
-                true,
-            );
-            prev_len = rx.len() as isize;
-            last_print = Instant::now();
-        }
+        if last_print.elapsed() >= print_interval {}
     }
-    // Final stats printout.
-    print_status(
-        &format!(
-            "Total time: {} s\tTotal events: {}\tAverage rate: {:.3} MB/s",
-            stats.t_begin.elapsed().as_secs(),
-            stats.n_events,
-            (stats.total_size as f64) / stats.t_begin.elapsed().as_secs_f64() / (1024.0 * 1024.0)
-        ),
-        false,
-        false,
-        true,
-    );
 
-    Ok(())
+    ratatui::restore();
+    status
 }
 
 fn begin_run(
