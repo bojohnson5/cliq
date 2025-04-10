@@ -18,3 +18,13 @@ pub struct AcqControl {
     pub acq_started: bool,
     pub num_ch: usize,
 }
+
+pub const EVENT_FORMAT: &str = " \
+    [ \
+        { \"name\" : \"TIMESTAMP_NS\", \"type\" : \"U64\" }, \
+        { \"name\" : \"TRIGGER_ID\", \"type\" : \"U32\" }, \
+        { \"name\" : \"WAVEFORM\", \"type\" : \"U16\", \"dim\" : 2 }, \
+        { \"name\" : \"WAVEFORM_SIZE\", \"type\" : \"SIZE_T\", \"dim\" : 1 }, \
+        { \"name\" : \"EVENT_SIZE\", \"type\" : \"SIZE_T\" } \
+    ] \
+";

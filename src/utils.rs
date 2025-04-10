@@ -1,16 +1,7 @@
-use anyhow::Result;
-use crossterm::{
-    cursor::{MoveTo, MoveToColumn, MoveToNextLine},
-    execute,
-    terminal::{Clear, ClearType},
-};
-
-use crate::{Conf, EventWrapper};
+use crate::EventWrapper;
 use std::{
-    fs::DirEntry,
-    io::{stdout, Write},
-    path::PathBuf,
-    time::Instant,
+    collections::VecDeque,
+    time::{Duration, Instant},
 };
 
 /// Structure representing an event coming from a board.
@@ -21,121 +12,99 @@ pub struct BoardEvent {
     pub event: EventWrapper,
 }
 
-/// A helper structure to track statistics.
-#[derive(Clone, Copy, Debug)]
+/// A helper structure to track statistics, with both
+/// *all-time* counters and a *sliding 1 s window* rate.
+#[derive(Debug)]
 pub struct Counter {
+    /// All-time total bytes
     pub total_size: usize,
+    /// All-time number of events
     pub n_events: usize,
+    /// Time when this counter was created or last reset
     pub t_begin: Instant,
+
+    // --- sliding window fields ---
+    window: Duration,
+    events: VecDeque<(Instant, usize)>,
+    bytes_in_window: usize,
 }
 
-impl std::default::Default for Counter {
+impl Default for Counter {
     fn default() -> Self {
-        Self {
+        let now = Instant::now();
+        Counter {
             total_size: 0,
             n_events: 0,
-            t_begin: Instant::now(),
+            t_begin: now,
+            window: Duration::from_secs(1),
+            events: VecDeque::new(),
+            bytes_in_window: 0,
         }
     }
 }
 
-#[allow(dead_code)]
 impl Counter {
+    /// Create a new Counter with a 1 s sliding window.
     pub fn new() -> Self {
-        Self {
-            total_size: 0,
-            n_events: 0,
-            t_begin: Instant::now(),
+        Default::default()
+    }
+
+    /// Copy constructor
+    pub fn from(other: &Self) -> Self {
+        Counter {
+            total_size: other.total_size,
+            n_events: other.n_events,
+            t_begin: other.t_begin,
+            window: other.window,
+            events: other.events.clone(),
+            bytes_in_window: other.bytes_in_window,
         }
     }
 
-    pub fn from(counter: &Self) -> Self {
-        Self {
-            total_size: counter.total_size,
-            n_events: counter.n_events,
-            t_begin: counter.t_begin,
-        }
+    /// Long-term average rate since t_begin, in MB/s
+    pub fn average_rate(&self) -> f64 {
+        let secs = self.t_begin.elapsed().as_secs_f64().max(1e-6);
+        (self.total_size as f64 / secs) / (1024.0 * 1024.0)
     }
 
+    /// Sliding-window rate over the last `window` duration (default 1 s), in MB/s
     pub fn rate(&self) -> f64 {
-        (self.total_size as f64) / self.t_begin.elapsed().as_secs_f64() / (1024.0 * 1024.0)
+        let secs = self.window.as_secs_f64().max(1e-6);
+        (self.bytes_in_window as f64 / secs) / (1024.0 * 1024.0)
     }
 
+    /// Record an event of `size` bytes.
+    /// Updates both the all-time totals and the sliding window.
     pub fn increment(&mut self, size: usize) {
+        let now = Instant::now();
+
+        // 1) Update all-time stats
         self.total_size += size;
         self.n_events += 1;
-    }
-}
 
-pub fn print_status(status: &str, clear_screen: bool, move_line: bool, clear_line: bool) {
-    let mut stdout = stdout();
-    if clear_screen {
-        execute!(stdout, Clear(ClearType::All), MoveTo(0, 0)).unwrap();
-    }
-    if move_line {
-        execute!(stdout, MoveToNextLine(1)).unwrap();
-    }
-    if clear_line {
-        execute!(stdout, Clear(ClearType::CurrentLine), MoveToColumn(0)).unwrap();
-    }
-    write!(stdout, "{}", status).unwrap();
-    stdout.flush().unwrap();
-}
+        // 2) Push into sliding window
+        self.events.push_back((now, size));
+        self.bytes_in_window += size;
 
-pub fn create_run_file(config: &Conf) -> Result<(PathBuf, usize)> {
-    let mut camp_dir = create_camp_dir(&config).unwrap();
-    let runs: Vec<DirEntry> = std::fs::read_dir(&camp_dir)
-        .unwrap()
-        .filter_map(|e| e.ok())
-        .collect();
-    let max_run = runs
-        .iter()
-        .filter_map(|path| {
-            path.file_name()
-                .to_str() // Get file name (OsStr)
-                .and_then(|filename| {
-                    // Ensure the filename starts with "run"
-                    if let Some(stripped) = filename.strip_prefix("run") {
-                        // Split at '_' and take the first part
-                        let parts: Vec<&str> = stripped.split('_').collect();
-                        parts.first()?.parse::<usize>().ok()
-                    } else {
-                        None
-                    }
-                })
-        })
-        .max();
-
-    if let Some(max) = max_run {
-        let file = format!("run{}_0.h5", max + 1);
-        camp_dir.push(&file);
-        Ok((camp_dir, max + 1))
-    } else {
-        Ok((camp_dir.join("run0_0.h5"), 0))
-    }
-}
-
-pub fn create_camp_dir(config: &Conf) -> Result<PathBuf> {
-    let camp_dir = format!(
-        "{}/camp{}",
-        config.run_settings.output_dir, config.run_settings.campaign_num
-    );
-    let path = PathBuf::from(camp_dir);
-    if !std::fs::exists(&path).unwrap() {
-        match std::fs::create_dir_all(&path) {
-            Ok(_) => {
-                print_status("Create campaign directory\n", false, true, false);
-            }
-            Err(e) => {
-                print_status(
-                    &format!("error creating dir: {:?}\n", e),
-                    false,
-                    true,
-                    false,
-                );
+        // 3) Evict any entries older than `window`
+        while let Some(&(ts, sz)) = self.events.front() {
+            if now.duration_since(ts) > self.window {
+                self.events.pop_front();
+                self.bytes_in_window -= sz;
+            } else {
+                break;
             }
         }
     }
 
-    Ok(path)
+    /// Reset both all-time counters and the sliding window.
+    pub fn reset(&mut self) {
+        let now = Instant::now();
+        self.total_size = 0;
+        self.n_events = 0;
+        self.t_begin = now;
+
+        self.events.clear();
+        self.bytes_in_window = 0;
+    }
 }
