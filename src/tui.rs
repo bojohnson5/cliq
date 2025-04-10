@@ -128,7 +128,7 @@ impl Status {
     }
 
     fn handle_events(&mut self) -> Result<()> {
-        if event::poll(Duration::from_millis(100))? {
+        if event::poll(Duration::ZERO)? {
             match event::read()? {
                 Event::Key(key_event) if key_event.kind == KeyEventKind::Press => {
                     self.handle_key_event(key_event)
