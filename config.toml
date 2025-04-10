@@ -1,6 +1,6 @@
 [run_settings]
 # run duration in seconds
-run_duration = 30
+run_duration = 60
 output_dir = "/home/lardaq/Documents/testing"
 campaign_num = 0
 
@@ -11,13 +11,12 @@ campaign_num = 0
 en_chans = true
 
 # record_len is the waveform length in samples
-# record_len = 33000
 record_len = 4125
 
 # pre_trig_len is pre-trigger length in samples
-pre_trig_len = 1250
-trig_source = "TrgIn" # TrgIn is another option
-# trig_source = "SwTrg | TestPulse" # TrgIn is another option
+pre_trig_len = 100
+# trig_source = "TrgIn" # TrgIn is another option
+trig_source = "SwTrg | TestPulse" # TrgIn is another option
 io_level = "TTL"
 
 # dc_offset can be a single number for each channel

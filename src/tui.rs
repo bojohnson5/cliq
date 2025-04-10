@@ -53,6 +53,7 @@ pub struct Status {
     pub buffer_len: usize,
     pub config: Conf,
     pub boards: Vec<(usize, u64)>,
+    pub max_runs: Option<usize>,
     pub exit: Option<StatusExit>,
 }
 
@@ -126,7 +127,7 @@ impl Status {
         }
     }
 
-    pub fn new(config: Conf, boards: Vec<(usize, u64)>) -> Self {
+    pub fn new(config: Conf, boards: Vec<(usize, u64)>, max_runs: Option<usize>) -> Self {
         let run_duration = Duration::from_secs(config.run_settings.run_duration);
         let camp_num = config.run_settings.campaign_num;
         Self {
@@ -138,6 +139,7 @@ impl Status {
             curr_run: 0,
             config,
             boards,
+            max_runs,
             exit: None,
             buffer_len: 0,
         }
@@ -347,7 +349,7 @@ fn event_processing(
     loop {
         // Use a blocking recv with timeout to periodically print stats.
         match rx.recv_timeout(Duration::from_millis(100)) {
-            Ok(board_event) => {
+            Ok(mut board_event) => {
                 match board_event.board_id {
                     0 => {
                         run_info.board0_info.event_size = board_event.event.c_event.event_size;
@@ -363,6 +365,7 @@ fn event_processing(
                     }
                     _ => unreachable!(),
                 }
+                zero_suppress(&mut board_event);
                 events.push(board_event);
                 if events.len() == 2 {
                     if tx_stats.send(run_info).is_err() {
@@ -371,7 +374,6 @@ fn event_processing(
                     if run_info.board0_info.trigger_id != run_info.board1_info.trigger_id {
                         break;
                     }
-                    run_info = RunInfo::default();
                     writer
                         .append_event(
                             events[0].board_id,
@@ -386,6 +388,7 @@ fn event_processing(
                             &events[1].event.waveform_data,
                         )
                         .unwrap();
+                    run_info = RunInfo::default();
                     events.clear();
                 }
             }
@@ -398,6 +401,7 @@ fn event_processing(
             }
         }
         if shutdown.load(Ordering::SeqCst) {
+            writer.flush_all().unwrap();
             break;
         }
     }
@@ -475,4 +479,11 @@ fn data_taking_thread(
         }
     }
     Ok(())
+}
+
+fn zero_suppress(board_data: &mut BoardEvent) {
+    board_data
+        .event
+        .waveform_data
+        .par_map_inplace(|adc| *adc = 0);
 }

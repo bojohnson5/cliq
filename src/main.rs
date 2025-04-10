@@ -51,7 +51,7 @@ fn main() -> Result<()> {
     println!("done.");
 
     let mut terminal = ratatui::init();
-    let status = Status::new(config, boards).run(&mut terminal);
+    let status = Status::new(config, boards, args.runs).run(&mut terminal);
     ratatui::restore();
 
     println!("\nTTFN!");
