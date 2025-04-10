@@ -11,7 +11,7 @@ hdf5 = { package = "hdf5-metno", version = "0.10.0", features = ["blosc-all"] }
 ndarray = "0.16.1"
 anyhow = "1.0.97"
 libc = "0.2.171"
-crossbeam-channel = "0.5.14"
+crossbeam-channel = "0.5.15"
 clap = { version = "4.5.35", features = ["derive"] }
 ratatui = "0.29.0"
 
