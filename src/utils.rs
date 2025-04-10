@@ -82,7 +82,7 @@ pub fn print_status(status: &str, clear_screen: bool, move_line: bool, clear_lin
     stdout.flush().unwrap();
 }
 
-pub fn create_run_file(config: &Conf) -> Result<PathBuf> {
+pub fn create_run_file(config: &Conf) -> Result<(PathBuf, usize)> {
     let mut camp_dir = create_camp_dir(&config).unwrap();
     let runs: Vec<DirEntry> = std::fs::read_dir(&camp_dir)
         .unwrap()
@@ -98,7 +98,7 @@ pub fn create_run_file(config: &Conf) -> Result<PathBuf> {
                     if let Some(stripped) = filename.strip_prefix("run") {
                         // Split at '_' and take the first part
                         let parts: Vec<&str> = stripped.split('_').collect();
-                        parts.first()?.parse::<u32>().ok()
+                        parts.first()?.parse::<usize>().ok()
                     } else {
                         None
                     }
@@ -109,9 +109,9 @@ pub fn create_run_file(config: &Conf) -> Result<PathBuf> {
     if let Some(max) = max_run {
         let file = format!("run{}_0.h5", max + 1);
         camp_dir.push(&file);
-        Ok(camp_dir)
+        Ok((camp_dir, max + 1))
     } else {
-        Ok(camp_dir.join("run0_0.h5"))
+        Ok((camp_dir.join("run0_0.h5"), 0))
     }
 }
 

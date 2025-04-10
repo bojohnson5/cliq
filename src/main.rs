@@ -4,7 +4,6 @@ use confique::Config;
 use core::str;
 use crossbeam_channel::{unbounded, Receiver, RecvTimeoutError, Sender};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
-use crossterm::terminal::{self};
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -46,7 +45,6 @@ struct Args {
 fn main() -> Result<()> {
     let args = Args::parse();
     let config = Conf::from_file(args.config).map_err(|_| FELibReturn::InvalidParam)?;
-    let max_run = if let Some(num) = args.runs { num } else { 0 };
 
     // List of board connection strings. Add as many as needed.
     let board_urls = vec!["dig2://caendgtz-usb-25380", "dig2://caendgtz-usb-25379"];
@@ -81,58 +79,43 @@ fn main() -> Result<()> {
     }
     println!("done.");
 
-    let mut quit = false;
     let mut curr_run = 0;
     let shutdown = Arc::new(AtomicBool::new(false));
-    while !quit {
-        let end_run = Instant::now() + Duration::from_secs(config.run_settings.run_duration);
+    while !shutdown.load(Ordering::SeqCst) {
+        curr_run += 1;
         let shutdown_clone = Arc::clone(&shutdown);
         let (tx, event_processing_handle, board_threads) =
             begin_run(&config, &boards, shutdown_clone)?;
 
-        curr_run += 1;
-        if Instant::now() > end_run {
-            if curr_run == max_run && max_run != 0 {
-                print_status("Quitting DAQ...", false, true, false);
-                quit = true;
-            } else {
-                print_status("Ending run...", false, true, false);
-            }
-            // Stop acquisition on all boards.
-            for &(_, dev_handle) in &boards {
-                felib_sendcommand(dev_handle, "/cmd/disarmacquisition")?;
-            }
-            // Close the tx channel so that the event processing thread can exit.
-            drop(tx);
+        let reason = event_processing_handle
+            .join()
+            .expect("event processing panicked")?;
 
-            // Wait for the input, event processing, and board threads to finish.
-            event_processing_handle
-                .join()
-                .expect("Event processing thread panicked")?;
-            for handle in board_threads {
-                handle.join().expect("A board thread panicked");
-            }
-        } else if shutdown.load(Ordering::SeqCst) {
-            print_status("Quitting DAQ...", false, true, false);
-            // Stop acquisition on all boards.
-            for &(_, dev_handle) in &boards {
-                felib_sendcommand(dev_handle, "/cmd/disarmacquisition")?;
-            }
-            // Close the tx channel so that the event processing thread can exit.
-            drop(tx);
+        // Stop acquisition on all boards.
+        for &(_, dev_handle) in &boards {
+            felib_sendcommand(dev_handle, "/cmd/disarmacquisition")?;
+        }
+        for handle in board_threads {
+            handle.join().expect("A board thread panicked");
+        }
+        // Close the tx channel so that the event processing thread can exit.
+        drop(tx);
 
-            // Wait for the input, event processing, and board threads to finish.
-            event_processing_handle
-                .join()
-                .expect("Event processing thread panicked")?;
-            for handle in board_threads {
-                handle.join().expect("A board thread panicked");
+        match reason {
+            StatusExit::Quit => {
+                break;
             }
-            quit = true;
+            StatusExit::Timeout => {
+                if let Some(max) = args.runs {
+                    if curr_run >= max {
+                        break;
+                    }
+                }
+                continue;
+            }
         }
     }
 
-    terminal::disable_raw_mode().expect("Failed to disable raw mode");
     // Close all boards.
     for &(_, dev_handle) in &boards {
         felib_close(dev_handle)?;
@@ -170,6 +153,7 @@ fn data_taking_thread(
     tx: Sender<BoardEvent>,
     acq_start: Arc<(Mutex<bool>, Condvar)>,
     endpoint_configured: Arc<(Mutex<u32>, Condvar)>,
+    shutdown: Arc<AtomicBool>,
 ) -> Result<(), FELibReturn> {
     // Set up endpoint.
     let mut ep_handle = 0;
@@ -203,6 +187,9 @@ fn data_taking_thread(
     let waveform_len = config.board_settings.record_len;
     let mut event = EventWrapper::new(num_ch, waveform_len);
     loop {
+        if shutdown.load(Ordering::SeqCst) {
+            break;
+        }
         let ret = felib_readdata(ep_handle, &mut event);
         match ret {
             FELibReturn::Success => {
@@ -212,7 +199,9 @@ fn data_taking_thread(
                     board_id,
                     event: std::mem::replace(&mut event, EventWrapper::new(num_ch, waveform_len)),
                 };
-                tx.send(board_event).expect("Failed to send event");
+                if tx.send(board_event).is_err() {
+                    break;
+                }
             }
             FELibReturn::Timeout => continue,
             FELibReturn::Stop => {
@@ -369,8 +358,19 @@ fn configure_sync(
 #[derive(Debug)]
 struct Status {
     counter: Counter,
-    exit: bool,
-    rx: Receiver<usize>,
+    rx: Receiver<(usize, usize)>,
+    t_begin: Instant,
+    run_duration: Duration,
+    run_num: usize,
+    camp_num: usize,
+    buffer_len: usize,
+    exit: Option<StatusExit>,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum StatusExit {
+    Quit,
+    Timeout,
 }
 
 impl Status {
@@ -378,32 +378,44 @@ impl Status {
         &mut self,
         terminal: &mut Arc<Mutex<DefaultTerminal>>,
         shutdown: Arc<AtomicBool>,
-    ) -> Result<()> {
-        while !self.exit {
-            terminal.lock().unwrap().draw(|frame| self.draw(frame))?;
-            self.handle_events()?;
-            match self.rx.recv_timeout(Duration::from_millis(100)) {
-                Ok(event_size) => {
-                    self.counter.increment(event_size);
-                }
-                Err(RecvTimeoutError::Timeout) => {
-                    // no new data this tick; just redraw again
-                }
-                Err(RecvTimeoutError::Disconnected) => {
-                    // sender hung up; exit the loop
-                    self.exit = true;
-                }
+        rx: Receiver<()>,
+    ) -> Result<StatusExit> {
+        while self.exit.is_none() {
+            if rx.recv().is_err() {
+                break;
             }
+            while let Ok(size) = self.rx.try_recv() {
+                self.counter.increment(size.0);
+                self.buffer_len = size.1;
+            }
+            self.handle_events()?;
+            if self.t_begin.elapsed() > self.run_duration {
+                self.exit = Some(StatusExit::Timeout);
+            }
+            terminal.lock().unwrap().draw(|frame| self.draw(frame))?;
         }
-        shutdown.store(true, Ordering::SeqCst);
-        Ok(())
+        if let Some(StatusExit::Quit) = self.exit {
+            shutdown.store(true, Ordering::SeqCst);
+        }
+        let exit_status = self.exit.unwrap();
+        Ok(exit_status)
     }
 
-    pub fn new(rx: Receiver<usize>) -> Self {
+    pub fn new(
+        rx: Receiver<(usize, usize)>,
+        run_duration: Duration,
+        camp_num: usize,
+        run_num: usize,
+    ) -> Self {
         Self {
             counter: Counter::default(),
-            exit: false,
             rx,
+            t_begin: Instant::now(),
+            run_duration,
+            run_num,
+            camp_num,
+            exit: None,
+            buffer_len: 0,
         }
     }
 
@@ -412,7 +424,7 @@ impl Status {
     }
 
     fn handle_events(&mut self) -> Result<()> {
-        if event::poll(Duration::from_millis(100))? {
+        if event::poll(Duration::from_millis(10))? {
             match event::read()? {
                 Event::Key(key_event) if key_event.kind == KeyEventKind::Press => {
                     self.handle_key_event(key_event)
@@ -431,13 +443,14 @@ impl Status {
     }
 
     fn exit(&mut self) {
-        self.exit = true;
+        self.exit = Some(StatusExit::Quit);
     }
 }
 
 impl Widget for &Status {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let title = Line::from(" Run Status ".bold());
+        let title =
+            Line::from(format!(" Campaign {} Run {} Status ", self.camp_num, self.run_num).bold());
         let instructrions = Line::from(vec![" Quit ".into(), "<Q> ".blue().bold()]);
         let block = Block::bordered()
             .title(title.centered())
@@ -456,8 +469,10 @@ impl Widget for &Status {
             " Events: ".into(),
             self.counter.n_events.to_string().yellow(),
             " Data rate: ".into(),
-            self.counter.rate().to_string().yellow(),
+            format!("{:.2}", self.counter.rate()).yellow(),
             " MB/s ".into(),
+            " Buffer length: ".into(),
+            self.buffer_len.to_string().yellow(),
         ])]);
 
         Paragraph::new(status_text)
@@ -470,20 +485,36 @@ impl Widget for &Status {
 fn event_processing(
     rx: Receiver<BoardEvent>,
     run_file: PathBuf,
+    run_num: usize,
     config: Conf,
     boards: Vec<(usize, u64)>,
     shutdown: Arc<AtomicBool>,
-) -> Result<()> {
-    let terminal = ratatui::init();
-    let (tx_user, rx_user) = unbounded();
+) -> Result<StatusExit> {
+    let (tick_tx, tick_rx) = unbounded();
+    let tick_rate = Duration::from_secs(1);
+    // Spawn the ticker thread
+    thread::spawn(move || {
+        while tick_tx.send(()).is_ok() {
+            thread::sleep(tick_rate);
+        }
+    });
+
     let shutdown_clone = Arc::clone(&shutdown);
+    let run_duration = Duration::from_secs(config.run_settings.run_duration);
+    let (tx_user, rx_user) = unbounded();
+    let terminal = ratatui::init();
     // Spawn the TUI in a background thread
     let tui_handle = {
         let mut terminal = Arc::new(Mutex::new(terminal));
         std::thread::spawn(move || {
-            let mut status = Status::new(rx_user);
+            let mut status = Status::new(
+                rx_user,
+                run_duration,
+                config.run_settings.campaign_num,
+                run_num,
+            );
             // This will now run in parallel
-            status.run(&mut terminal, shutdown_clone).unwrap();
+            status.run(&mut terminal, shutdown_clone, tick_rx).unwrap()
         })
     };
 
@@ -496,7 +527,7 @@ fn event_processing(
         match rx.recv_timeout(Duration::from_millis(100)) {
             Ok(board_event) => {
                 // stats.increment(board_event.event.c_event.event_size);
-                match tx_user.send(board_event.event.c_event.event_size) {
+                match tx_user.send((board_event.event.c_event.event_size, rx.len())) {
                     Ok(_) => (),
                     Err(_) => break,
                 }
@@ -524,8 +555,8 @@ fn event_processing(
 
     drop(tx_user);
     ratatui::restore();
-    tui_handle.join().unwrap();
-    Ok(())
+    let reason = tui_handle.join().expect("TUI panicked");
+    Ok(reason)
 }
 
 fn begin_run(
@@ -534,7 +565,7 @@ fn begin_run(
     shutdown: Arc<AtomicBool>,
 ) -> Result<(
     Sender<BoardEvent>,
-    JoinHandle<Result<()>>,
+    JoinHandle<Result<StatusExit>>,
     Vec<JoinHandle<()>>,
 )> {
     print_status("Beginning new run", true, true, false);
@@ -553,6 +584,7 @@ fn begin_run(
         let acq_start_clone = Arc::clone(&acq_start);
         let endpoint_configured_clone = Arc::clone(&endpoint_configured);
         let tx_clone = tx.clone();
+        let shutdown_clone = Arc::clone(&shutdown);
         let handle = thread::spawn(move || {
             data_taking_thread(
                 board_id,
@@ -561,6 +593,7 @@ fn begin_run(
                 tx_clone,
                 acq_start_clone,
                 endpoint_configured_clone,
+                shutdown_clone,
             )
             .unwrap_or_else(|e| eprintln!("Board {} error: {:?}", board_id, e));
         });
@@ -595,15 +628,21 @@ fn begin_run(
     print_status("done.", false, false, false);
 
     // Create the appropriate directory for file-writing
-    let run_file = create_run_file(config).unwrap();
+    let (run_file, run_num) = create_run_file(config).unwrap();
 
     // Spawn a dedicated thread to process incoming events and print global stats.
     let config_clone = config.clone();
     let boards_clone = boards.clone();
     let shutdown_clone = Arc::clone(&shutdown);
-    let event_processing_handle = thread::spawn(move || -> Result<()> {
-        event_processing(rx, run_file, config_clone, boards_clone, shutdown_clone)?;
-        Ok(())
+    let event_processing_handle = thread::spawn(move || -> Result<StatusExit> {
+        event_processing(
+            rx,
+            run_file,
+            run_num,
+            config_clone,
+            boards_clone,
+            shutdown_clone,
+        )
     });
 
     Ok((tx, event_processing_handle, board_threads))
