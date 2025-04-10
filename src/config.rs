@@ -26,6 +26,7 @@ pub struct BoardSettings {
     pub pre_trig_len: usize,
     pub trig_source: String,
     pub dc_offset: DCOffsetConfig,
+    pub io_level: String,
 }
 
 #[derive(Config, Debug, Clone)]

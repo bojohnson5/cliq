@@ -397,6 +397,7 @@ fn configure_board(handle: u64, config: &Conf) -> Result<(), FELibReturn> {
         "/par/AcqTriggerSource",
         &config.board_settings.trig_source,
     )?;
+    felib_setvalue(handle, "/par/IOlevel", &config.board_settings.io_level)?;
     felib_setvalue(handle, "/par/TestPulsePeriod", "8333333")?;
     felib_setvalue(handle, "/par/TestPulseWidth", "1000")?;
     felib_setvalue(handle, "/par/TestPulseLowLevel", "0")?;
@@ -475,7 +476,8 @@ fn get_clock_out_delay(board_id: isize, num_boards: isize) -> isize {
     if last_board {
         0
     } else if first_board {
-        -2148
+        // -2148
+        -2188
     } else {
         -3111
     }
