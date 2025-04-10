@@ -65,6 +65,12 @@ impl Counter {
         self.total_size += size;
         self.n_events += 1;
     }
+
+    pub fn reset(&mut self) {
+        self.total_size = 0;
+        self.n_events = 0;
+        self.t_begin = Instant::now();
+    }
 }
 
 pub fn print_status(status: &str, clear_screen: bool, move_line: bool, clear_line: bool) {
