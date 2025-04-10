@@ -26,7 +26,7 @@ impl HDF5Writer {
     ) -> Result<Self> {
         let file_template = filename.to_str().unwrap().replace("_0", "_{}");
         let file = File::create(filename)?;
-        blosc_set_nthreads(20);
+        blosc_set_nthreads(10);
 
         // Create BoardData for each board.
         let (board0, board1) =
@@ -167,7 +167,7 @@ impl BoardData {
         let timestamps = group
             .new_dataset::<u64>()
             .shape(ts_shape)
-            .blosc_zstd(3, true)
+            .blosc_zstd(2, true)
             .chunk((buffer_capacity, 1))
             .create("timestamps")?;
 
@@ -176,9 +176,8 @@ impl BoardData {
             .new_dataset::<u16>()
             .shape(wf_shape)
             // Set chunking and compression if desired.
-            .blosc_zstd(3, true)
+            .blosc_zstd(2, true)
             .chunk((buffer_capacity, n_channels, n_samples))
-            // .deflate(3)
             .create("waveforms")?;
 
         // Create the in-memory buffers.

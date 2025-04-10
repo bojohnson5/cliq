@@ -29,6 +29,16 @@ pub struct Counter {
     pub t_begin: Instant,
 }
 
+impl std::default::Default for Counter {
+    fn default() -> Self {
+        Self {
+            total_size: 0,
+            n_events: 0,
+            t_begin: Instant::now(),
+        }
+    }
+}
+
 #[allow(dead_code)]
 impl Counter {
     pub fn new() -> Self {
@@ -45,6 +55,10 @@ impl Counter {
             n_events: counter.n_events,
             t_begin: counter.t_begin,
         }
+    }
+
+    pub fn rate(&self) -> f64 {
+        (self.total_size as f64) / self.t_begin.elapsed().as_secs_f64() / (1024.0 * 1024.0)
     }
 
     pub fn increment(&mut self, size: usize) {
@@ -68,7 +82,7 @@ pub fn print_status(status: &str, clear_screen: bool, move_line: bool, clear_lin
     stdout.flush().unwrap();
 }
 
-pub fn create_run_file(config: &Conf) -> Result<PathBuf> {
+pub fn create_run_file(config: &Conf) -> Result<(PathBuf, usize)> {
     let mut camp_dir = create_camp_dir(&config).unwrap();
     let runs: Vec<DirEntry> = std::fs::read_dir(&camp_dir)
         .unwrap()
@@ -84,7 +98,7 @@ pub fn create_run_file(config: &Conf) -> Result<PathBuf> {
                     if let Some(stripped) = filename.strip_prefix("run") {
                         // Split at '_' and take the first part
                         let parts: Vec<&str> = stripped.split('_').collect();
-                        parts.first()?.parse::<u32>().ok()
+                        parts.first()?.parse::<usize>().ok()
                     } else {
                         None
                     }
@@ -95,9 +109,9 @@ pub fn create_run_file(config: &Conf) -> Result<PathBuf> {
     if let Some(max) = max_run {
         let file = format!("run{}_0.h5", max + 1);
         camp_dir.push(&file);
-        Ok(camp_dir)
+        Ok((camp_dir, max + 1))
     } else {
-        Ok(camp_dir.join("run0_0.h5"))
+        Ok((camp_dir.join("run0_0.h5"), 0))
     }
 }
 
