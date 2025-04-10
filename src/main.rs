@@ -16,6 +16,7 @@ use ratatui::{
 };
 use rust_daq::*;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::{
     io,
     sync::{Arc, Condvar, Mutex},
@@ -389,13 +390,28 @@ struct Status {
 }
 
 impl Status {
-    pub fn run(&mut self, terminal: &mut DefaultTerminal) -> Result<()> {
+    pub fn run(
+        &mut self,
+        terminal: &mut Arc<Mutex<DefaultTerminal>>,
+        shutdown: Arc<AtomicBool>,
+    ) -> Result<()> {
         while !self.exit {
-            terminal.draw(|frame| self.draw(frame))?;
+            terminal.lock().unwrap().draw(|frame| self.draw(frame))?;
             self.handle_events()?;
-            let event_size = self.rx.recv_timeout(Duration::from_millis(100))?;
-            self.counter.increment(event_size);
+            match self.rx.recv_timeout(Duration::from_millis(100)) {
+                Ok(event_size) => {
+                    self.counter.increment(event_size);
+                }
+                Err(RecvTimeoutError::Timeout) => {
+                    // no new data this tick; just redraw again
+                }
+                Err(RecvTimeoutError::Disconnected) => {
+                    // sender hung up; exit the loop
+                    self.exit = true;
+                }
+            }
         }
+        shutdown.store(true, Ordering::SeqCst);
         Ok(())
     }
 
@@ -412,12 +428,14 @@ impl Status {
     }
 
     fn handle_events(&mut self) -> Result<()> {
-        match event::read()? {
-            Event::Key(key_event) if key_event.kind == KeyEventKind::Press => {
-                self.handle_key_event(key_event)
-            }
-            _ => {}
-        };
+        if event::poll(Duration::from_millis(100))? {
+            match event::read()? {
+                Event::Key(key_event) if key_event.kind == KeyEventKind::Press => {
+                    self.handle_key_event(key_event)
+                }
+                _ => {}
+            };
+        }
         Ok(())
     }
 
@@ -470,6 +488,7 @@ fn event_processing(
     run_file: PathBuf,
     config: Conf,
     boards: Vec<(usize, u64)>,
+    shutdown: Arc<AtomicBool>,
 ) -> Result<()> {
     let mut stats = Counter::new();
     let print_interval = Duration::from_secs(1);
@@ -477,20 +496,32 @@ fn event_processing(
 
     let mut terminal = ratatui::init();
     let (tx_user, rx_user) = unbounded();
-    let status = Status::new(rx_user).run(&mut terminal);
+    // Spawn the TUI in a background thread
+    let tui_handle = {
+        let mut terminal = Arc::new(Mutex::new(terminal));
+        std::thread::spawn(move || {
+            let mut status = Status::new(rx_user);
+            // This will now run in parallel
+            status.run(&mut terminal).unwrap();
+        })
+    };
 
     let board_handles: Vec<u64> = boards.iter().map(|(_, h)| *h).collect();
     let mut prev_len = 0;
     let mut writer =
         HDF5Writer::new(run_file, 64, config.board_settings.record_len, 7500, 50).unwrap();
     loop {
+        if shutdown.load(Ordering::SeqCst) {
+            break;
+        }
         // Use a blocking recv with timeout to periodically print stats.
         match rx.recv_timeout(Duration::from_millis(100)) {
             Ok(board_event) => {
-                stats.increment(board_event.event.c_event.event_size);
-                tx_user
-                    .send(board_event.event.c_event.event_size)
-                    .expect("couldn't send event size");
+                // stats.increment(board_event.event.c_event.event_size);
+                match tx_user.send(board_event.event.c_event.event_size) {
+                    Ok(_) => (),
+                    Err(_) => break,
+                }
                 // You can also log which board the event came from if needed.
                 writer
                     .append_event(
@@ -511,8 +542,10 @@ fn event_processing(
         if last_print.elapsed() >= print_interval {}
     }
 
+    drop(tx_user);
     ratatui::restore();
-    status
+    tui_handle.join().unwrap();
+    Ok(())
 }
 
 fn begin_run(
