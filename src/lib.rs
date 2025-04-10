@@ -1,12 +1,14 @@
 mod config;
 mod event;
 mod felib;
+mod tui;
 mod utils;
 mod writer;
 
-pub use config::{ChannelConfig, Conf, DCOffsetConfig};
+pub use config::*;
 pub use event::*;
 pub use felib::*;
+pub use tui::*;
 pub use utils::*;
 pub use writer::*;
 
