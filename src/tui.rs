@@ -345,9 +345,8 @@ fn event_processing(
     let mut writer =
         HDF5Writer::new(run_file, 64, config.board_settings.record_len, 7500, 50).unwrap();
     let mut run_info = RunInfo::default();
-    let mut events = Vec::with_capacity(5);
+    let mut events = Vec::with_capacity(4);
     loop {
-        // Use a blocking recv with timeout to periodically print stats.
         match rx.recv_timeout(Duration::from_millis(100)) {
             Ok(mut board_event) => {
                 match board_event.board_id {
@@ -372,6 +371,7 @@ fn event_processing(
                         break;
                     }
                     if run_info.board0_info.trigger_id != run_info.board1_info.trigger_id {
+                        println!("Trigger IDs don't align. Quitting DAQ.");
                         break;
                     }
                     writer
