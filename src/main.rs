@@ -18,7 +18,6 @@ use rust_daq::*;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::{
-    io,
     sync::{Arc, Condvar, Mutex},
     thread::{self, JoinHandle},
     time::{Duration, Instant},
@@ -83,68 +82,53 @@ fn main() -> Result<()> {
     println!("done.");
 
     let mut quit = false;
-    let (tx_user, rx_user) = unbounded();
-
-    // Spawn a dedicated thread to listen for user input.
-    input_thread(tx_user);
     let mut curr_run = 0;
+    let shutdown = Arc::new(AtomicBool::new(false));
     while !quit {
-        let timeout_duration = Duration::from_secs(config.run_settings.run_duration);
-        let (tx, event_processing_handle, board_threads) = begin_run(&config, &boards)?;
+        let end_run = Instant::now() + Duration::from_secs(config.run_settings.run_duration);
+        let shutdown_clone = Arc::clone(&shutdown);
+        let (tx, event_processing_handle, board_threads) =
+            begin_run(&config, &boards, shutdown_clone)?;
 
         curr_run += 1;
-        match rx_user.recv_timeout(timeout_duration) {
-            Ok(c) => match c {
-                's' => {
-                    print_status("Quitting DAQ...", false, true, false);
-                    // Stop acquisition on all boards.
-                    for &(_, dev_handle) in &boards {
-                        felib_sendcommand(dev_handle, "/cmd/disarmacquisition")?;
-                    }
-                    // Close the tx channel so that the event processing thread can exit.
-                    drop(tx);
-
-                    // Wait for the input, event processing, and board threads to finish.
-                    event_processing_handle
-                        .join()
-                        .expect("Event processing thread panicked")?;
-                    for handle in board_threads {
-                        handle.join().expect("A board thread panicked");
-                    }
-                    quit = true;
-                }
-                't' => {
-                    for &(_, dev_handle) in &boards {
-                        felib_sendcommand(dev_handle, "/cmd/sendswtrigger")?;
-                    }
-                }
-                _ => {
-                    println!("OK received: read {:?} from user", c);
-                }
-            },
-            Err(RecvTimeoutError::Timeout) => {
-                if curr_run == max_run && max_run != 0 {
-                    print_status("Quitting DAQ...", false, true, false);
-                    quit = true;
-                } else {
-                    print_status("Ending run...", false, true, false);
-                }
-                // Stop acquisition on all boards.
-                for &(_, dev_handle) in &boards {
-                    felib_sendcommand(dev_handle, "/cmd/disarmacquisition")?;
-                }
-                // Close the tx channel so that the event processing thread can exit.
-                drop(tx);
-
-                // Wait for the input, event processing, and board threads to finish.
-                event_processing_handle
-                    .join()
-                    .expect("Event processing thread panicked")?;
-                for handle in board_threads {
-                    handle.join().expect("A board thread panicked");
-                }
+        if Instant::now() > end_run {
+            if curr_run == max_run && max_run != 0 {
+                print_status("Quitting DAQ...", false, true, false);
+                quit = true;
+            } else {
+                print_status("Ending run...", false, true, false);
             }
-            _ => (),
+            // Stop acquisition on all boards.
+            for &(_, dev_handle) in &boards {
+                felib_sendcommand(dev_handle, "/cmd/disarmacquisition")?;
+            }
+            // Close the tx channel so that the event processing thread can exit.
+            drop(tx);
+
+            // Wait for the input, event processing, and board threads to finish.
+            event_processing_handle
+                .join()
+                .expect("Event processing thread panicked")?;
+            for handle in board_threads {
+                handle.join().expect("A board thread panicked");
+            }
+        } else if shutdown.load(Ordering::SeqCst) {
+            print_status("Quitting DAQ...", false, true, false);
+            // Stop acquisition on all boards.
+            for &(_, dev_handle) in &boards {
+                felib_sendcommand(dev_handle, "/cmd/disarmacquisition")?;
+            }
+            // Close the tx channel so that the event processing thread can exit.
+            drop(tx);
+
+            // Wait for the input, event processing, and board threads to finish.
+            event_processing_handle
+                .join()
+                .expect("Event processing thread panicked")?;
+            for handle in board_threads {
+                handle.join().expect("A board thread panicked");
+            }
+            quit = true;
         }
     }
 
@@ -490,19 +474,16 @@ fn event_processing(
     boards: Vec<(usize, u64)>,
     shutdown: Arc<AtomicBool>,
 ) -> Result<()> {
-    let mut stats = Counter::new();
-    let print_interval = Duration::from_secs(1);
-    let mut last_print = Instant::now();
-
-    let mut terminal = ratatui::init();
+    let terminal = ratatui::init();
     let (tx_user, rx_user) = unbounded();
+    let shutdown_clone = Arc::clone(&shutdown);
     // Spawn the TUI in a background thread
     let tui_handle = {
         let mut terminal = Arc::new(Mutex::new(terminal));
         std::thread::spawn(move || {
             let mut status = Status::new(rx_user);
             // This will now run in parallel
-            status.run(&mut terminal).unwrap();
+            status.run(&mut terminal, shutdown_clone).unwrap();
         })
     };
 
@@ -511,9 +492,6 @@ fn event_processing(
     let mut writer =
         HDF5Writer::new(run_file, 64, config.board_settings.record_len, 7500, 50).unwrap();
     loop {
-        if shutdown.load(Ordering::SeqCst) {
-            break;
-        }
         // Use a blocking recv with timeout to periodically print stats.
         match rx.recv_timeout(Duration::from_millis(100)) {
             Ok(board_event) => {
@@ -539,7 +517,9 @@ fn event_processing(
                 break;
             }
         }
-        if last_print.elapsed() >= print_interval {}
+        if shutdown.load(Ordering::SeqCst) {
+            break;
+        }
     }
 
     drop(tx_user);
@@ -551,13 +531,13 @@ fn event_processing(
 fn begin_run(
     config: &Conf,
     boards: &Vec<(usize, u64)>,
+    shutdown: Arc<AtomicBool>,
 ) -> Result<(
     Sender<BoardEvent>,
     JoinHandle<Result<()>>,
     Vec<JoinHandle<()>>,
 )> {
     print_status("Beginning new run", true, true, false);
-    print_status("Press [s] to stop data acquisition", false, true, false);
     // Shared signal for acquisition start.
     let acq_start = Arc::new((Mutex::new(false), Condvar::new()));
     // Shared counter for endpoint configuration.
@@ -620,31 +600,11 @@ fn begin_run(
     // Spawn a dedicated thread to process incoming events and print global stats.
     let config_clone = config.clone();
     let boards_clone = boards.clone();
+    let shutdown_clone = Arc::clone(&shutdown);
     let event_processing_handle = thread::spawn(move || -> Result<()> {
-        event_processing(rx, run_file, config_clone, boards_clone)?;
+        event_processing(rx, run_file, config_clone, boards_clone, shutdown_clone)?;
         Ok(())
     });
 
     Ok((tx, event_processing_handle, board_threads))
-}
-
-fn input_thread(tx: Sender<char>) {
-    thread::spawn(move || {
-        // Enable raw mode once.
-        terminal::enable_raw_mode().expect("Failed to enable raw mode");
-        loop {
-            // Poll with a short timeout.
-            if event::poll(Duration::from_millis(100)).expect("Polling failed") {
-                if let Event::Key(key_event) = event::read().expect("Read failed") {
-                    // Send only one character.
-                    if let KeyCode::Char(c) = key_event.code {
-                        if tx.send(c).is_err() {
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-        terminal::disable_raw_mode().expect("Failed to disable raw mode");
-    });
 }
