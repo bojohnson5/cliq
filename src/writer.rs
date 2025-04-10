@@ -10,7 +10,7 @@ pub struct HDF5Writer {
     pub board1: BoardData,
     n_channels: usize,
     n_samples: usize,
-    max_events: usize,
+    max_events_per_board: usize,
     buffer_capacity: usize,
     subrun: usize,
     file_template: String,
@@ -21,7 +21,7 @@ impl HDF5Writer {
         filename: PathBuf,
         n_channels: usize,
         n_samples: usize,
-        max_events: usize,
+        max_events_per_board: usize,
         buffer_capacity: usize,
     ) -> Result<Self> {
         let file_template = filename.to_str().unwrap().replace("_0", "_{}");
@@ -29,8 +29,13 @@ impl HDF5Writer {
         blosc_set_nthreads(10);
 
         // Create BoardData for each board.
-        let (board0, board1) =
-            Self::create_boards(&file, n_channels, n_samples, max_events, buffer_capacity)?;
+        let (board0, board1) = Self::create_boards(
+            &file,
+            n_channels,
+            n_samples,
+            max_events_per_board,
+            buffer_capacity,
+        )?;
 
         Ok(Self {
             file,
@@ -38,7 +43,7 @@ impl HDF5Writer {
             board1,
             n_channels,
             n_samples,
-            max_events,
+            max_events_per_board,
             buffer_capacity,
             subrun: 0,
             file_template,
@@ -119,7 +124,7 @@ impl HDF5Writer {
             &new_file,
             self.n_channels,
             self.n_samples,
-            self.max_events,
+            self.max_events_per_board,
             self.buffer_capacity,
         )?;
 

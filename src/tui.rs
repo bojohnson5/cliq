@@ -22,6 +22,26 @@ use std::{
     thread,
 };
 
+#[derive(Default, Clone, Copy)]
+struct RunInfo {
+    board0_info: BoardInfo,
+    board1_info: BoardInfo,
+    event_channel_buf: usize,
+}
+
+impl RunInfo {
+    fn event_size(&self) -> usize {
+        self.board0_info.event_size + self.board1_info.event_size
+    }
+}
+
+#[derive(Default, Clone, Copy)]
+struct BoardInfo {
+    event_size: usize,
+    trigger_id: u32,
+    board_id: usize,
+}
+
 #[derive(Debug)]
 pub struct Status {
     pub counter: Counter,
@@ -62,9 +82,9 @@ impl Status {
                 let _ = ticker.recv();
 
                 // Drain stats channel
-                while let Ok((sz, buf)) = rx_stats.try_recv() {
-                    self.counter.increment(sz);
-                    self.buffer_len = buf;
+                while let Ok(run_info) = rx_stats.try_recv() {
+                    self.counter.increment(run_info.event_size());
+                    self.buffer_len = run_info.event_channel_buf;
                 }
 
                 self.handle_events()?;
@@ -153,7 +173,7 @@ impl Status {
     fn begin_run(
         &mut self,
         shutdown: Arc<AtomicBool>,
-        tx_stats: Sender<(usize, usize)>,
+        tx_stats: Sender<RunInfo>,
     ) -> Result<(
         Sender<BoardEvent>,
         JoinHandle<Result<()>>,
@@ -215,17 +235,9 @@ impl Status {
 
         // Spawn a dedicated thread to process incoming events and print global stats.
         let config_clone = self.config.clone();
-        let boards_clone = self.boards.clone();
         let shutdown_clone = Arc::clone(&shutdown);
         let event_processing_handle = thread::spawn(move || -> Result<()> {
-            event_processing(
-                rx_events,
-                tx_stats,
-                run_file,
-                config_clone,
-                boards_clone,
-                shutdown_clone,
-            )
+            event_processing(rx_events, tx_stats, run_file, config_clone, shutdown_clone)
         });
 
         Ok((tx_events, event_processing_handle, board_thread_handles))
@@ -323,35 +335,59 @@ impl Widget for &Status {
 
 fn event_processing(
     rx: Receiver<BoardEvent>,
-    tx_stats: Sender<(usize, usize)>,
+    tx_stats: Sender<RunInfo>,
     run_file: PathBuf,
     config: Conf,
-    boards: Vec<(usize, u64)>,
     shutdown: Arc<AtomicBool>,
 ) -> Result<()> {
-    let board_handles: Vec<u64> = boards.iter().map(|(_, h)| *h).collect();
-    let mut prev_len = 0;
     let mut writer =
         HDF5Writer::new(run_file, 64, config.board_settings.record_len, 7500, 50).unwrap();
+    let mut run_info = RunInfo::default();
+    let mut events = Vec::with_capacity(5);
     loop {
         // Use a blocking recv with timeout to periodically print stats.
         match rx.recv_timeout(Duration::from_millis(100)) {
             Ok(board_event) => {
-                // stats.increment(board_event.event.c_event.event_size);
-                if tx_stats
-                    .send((board_event.event.c_event.event_size, rx.len()))
-                    .is_err()
-                {
-                    break;
+                match board_event.board_id {
+                    0 => {
+                        run_info.board0_info.event_size = board_event.event.c_event.event_size;
+                        run_info.board0_info.board_id = 0;
+                        run_info.board0_info.trigger_id = board_event.event.c_event.trigger_id;
+                        run_info.event_channel_buf += rx.len();
+                    }
+                    1 => {
+                        run_info.board1_info.event_size = board_event.event.c_event.event_size;
+                        run_info.board1_info.board_id = 1;
+                        run_info.board1_info.trigger_id = board_event.event.c_event.trigger_id;
+                        run_info.event_channel_buf += rx.len();
+                    }
+                    _ => unreachable!(),
                 }
-                // You can also log which board the event came from if needed.
-                writer
-                    .append_event(
-                        board_event.board_id,
-                        board_event.event.c_event.timestamp,
-                        &board_event.event.waveform_data,
-                    )
-                    .unwrap();
+                events.push(board_event);
+                if events.len() == 2 {
+                    if tx_stats.send(run_info).is_err() {
+                        break;
+                    }
+                    if run_info.board0_info.trigger_id != run_info.board1_info.trigger_id {
+                        break;
+                    }
+                    run_info = RunInfo::default();
+                    writer
+                        .append_event(
+                            events[0].board_id,
+                            events[0].event.c_event.timestamp,
+                            &events[0].event.waveform_data,
+                        )
+                        .unwrap();
+                    writer
+                        .append_event(
+                            events[1].board_id,
+                            events[1].event.c_event.timestamp,
+                            &events[1].event.waveform_data,
+                        )
+                        .unwrap();
+                    events.clear();
+                }
             }
             Err(RecvTimeoutError::Timeout) => {
                 // If no event is received within the timeout, check if it's time to print.
