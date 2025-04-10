@@ -1,17 +1,5 @@
-use anyhow::Result;
-use crossterm::{
-    cursor::{MoveTo, MoveToColumn, MoveToNextLine},
-    execute,
-    terminal::{Clear, ClearType},
-};
-
-use crate::{Conf, EventWrapper};
-use std::{
-    fs::DirEntry,
-    io::{stdout, Write},
-    path::PathBuf,
-    time::Instant,
-};
+use crate::EventWrapper;
+use std::time::Instant;
 
 /// Structure representing an event coming from a board.
 #[derive(Debug)]
@@ -71,77 +59,4 @@ impl Counter {
         self.n_events = 0;
         self.t_begin = Instant::now();
     }
-}
-
-pub fn print_status(status: &str, clear_screen: bool, move_line: bool, clear_line: bool) {
-    let mut stdout = stdout();
-    if clear_screen {
-        execute!(stdout, Clear(ClearType::All), MoveTo(0, 0)).unwrap();
-    }
-    if move_line {
-        execute!(stdout, MoveToNextLine(1)).unwrap();
-    }
-    if clear_line {
-        execute!(stdout, Clear(ClearType::CurrentLine), MoveToColumn(0)).unwrap();
-    }
-    write!(stdout, "{}", status).unwrap();
-    stdout.flush().unwrap();
-}
-
-pub fn create_run_file(config: &Conf) -> Result<(PathBuf, usize)> {
-    let mut camp_dir = create_camp_dir(&config).unwrap();
-    let runs: Vec<DirEntry> = std::fs::read_dir(&camp_dir)
-        .unwrap()
-        .filter_map(|e| e.ok())
-        .collect();
-    let max_run = runs
-        .iter()
-        .filter_map(|path| {
-            path.file_name()
-                .to_str() // Get file name (OsStr)
-                .and_then(|filename| {
-                    // Ensure the filename starts with "run"
-                    if let Some(stripped) = filename.strip_prefix("run") {
-                        // Split at '_' and take the first part
-                        let parts: Vec<&str> = stripped.split('_').collect();
-                        parts.first()?.parse::<usize>().ok()
-                    } else {
-                        None
-                    }
-                })
-        })
-        .max();
-
-    if let Some(max) = max_run {
-        let file = format!("run{}_0.h5", max + 1);
-        camp_dir.push(&file);
-        Ok((camp_dir, max + 1))
-    } else {
-        Ok((camp_dir.join("run0_0.h5"), 0))
-    }
-}
-
-pub fn create_camp_dir(config: &Conf) -> Result<PathBuf> {
-    let camp_dir = format!(
-        "{}/camp{}",
-        config.run_settings.output_dir, config.run_settings.campaign_num
-    );
-    let path = PathBuf::from(camp_dir);
-    if !std::fs::exists(&path).unwrap() {
-        match std::fs::create_dir_all(&path) {
-            Ok(_) => {
-                print_status("Create campaign directory\n", false, true, false);
-            }
-            Err(e) => {
-                print_status(
-                    &format!("error creating dir: {:?}\n", e),
-                    false,
-                    true,
-                    false,
-                );
-            }
-        }
-    }
-
-    Ok(path)
 }
