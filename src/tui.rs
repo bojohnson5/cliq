@@ -492,7 +492,7 @@ fn event_processing(
         HDF5Writer::new(run_file, 64, config.board_settings.record_len, 7500, 50).unwrap();
     let mut queue0 = VecDeque::new();
     let mut queue1 = VecDeque::new();
-    let mut prev_trig_id = 0;
+    let mut curr_trig_id = 0;
     loop {
         match rx.recv_timeout(Duration::from_millis(100)) {
             Ok(mut board_event) => {
@@ -523,10 +523,10 @@ fn event_processing(
             if curr_trig0 != curr_trig1 {
                 return Err(DaqError::MisalignedEvents);
             }
-            if curr_trig0 != prev_trig_id + 1 {
+            if curr_trig0 != curr_trig_id {
                 return Err(DaqError::DroppedEvents);
             }
-            prev_trig_id += 1;
+            curr_trig_id += 1;
             let run_info = RunInfo {
                 board0_event_size: event0.event.c_event.event_size,
                 board1_event_size: event1.event.c_event.event_size,
