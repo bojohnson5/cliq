@@ -132,10 +132,12 @@ impl Status {
                         if let Err(daq_err) = inner {
                             match daq_err {
                                 DaqError::MisalignedEvents => {
-                                    self.show_popup = Some(String::from("Misaligned events"));
+                                    self.show_popup =
+                                        Some(String::from("Misaligned events. Quitting DAQ."));
                                 }
                                 DaqError::DroppedEvents => {
-                                    self.show_popup = Some(String::from("Events dropped"))
+                                    self.show_popup =
+                                        Some(String::from("Events dropped. Quitting DAQ."))
                                 }
                                 DaqError::FELib(val) => self.show_popup = Some(val.to_string()),
                             }
@@ -154,10 +156,12 @@ impl Status {
                     if let Err(daq_err) = inner {
                         match daq_err {
                             DaqError::MisalignedEvents => {
-                                self.show_popup = Some(String::from("Misaligned events"));
+                                self.show_popup =
+                                    Some(String::from("Misaligned events. Quitting DAQ."));
                             }
                             DaqError::DroppedEvents => {
-                                self.show_popup = Some(String::from("Events dropped"));
+                                self.show_popup =
+                                    Some(String::from("Events dropped. Quitting DAQ."));
                             }
                             _ => {}
                         }
@@ -193,16 +197,16 @@ impl Status {
         Self {
             counter: Counter::default(),
             t_begin: Instant::now(),
-            run_duration,
             run_num: 0,
             camp_num,
             curr_run: 0,
-            config,
-            boards,
-            max_runs,
             show_popup: None,
             exit: None,
             buffer_len: 0,
+            config,
+            boards,
+            max_runs,
+            run_duration,
         }
     }
 
@@ -227,7 +231,7 @@ impl Status {
         frame.render_widget(board1_status, inner_layout[1]);
 
         if let Some(err) = &self.show_popup {
-            let block = Block::bordered().title("DAQ Error");
+            let block = Block::bordered().title("DAQ Error").bold();
             let daq_error = Paragraph::new(Text::from(err.as_str()))
                 .centered()
                 .block(block);
@@ -598,7 +602,6 @@ fn data_taking_thread(
             }
             FELibReturn::Timeout => continue,
             FELibReturn::Stop => {
-                // println!("Board {}: Stop received...", board_id);
                 break;
             }
             _ => (),

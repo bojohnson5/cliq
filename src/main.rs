@@ -15,7 +15,7 @@ struct Args {
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    let config = Conf::from_file(args.config).map_err(|_| FELibReturn::InvalidParam)?;
+    let config = Conf::from_file(args.config)?;
 
     // List of board connection strings. Add as many as needed.
     let board_urls = vec!["dig2://caendgtz-usb-25380", "dig2://caendgtz-usb-25379"];
