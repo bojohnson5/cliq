@@ -25,31 +25,14 @@ use std::{
 
 #[derive(Default, Clone, Copy)]
 struct RunInfo {
-    board0_info: BoardInfo,
-    board1_info: BoardInfo,
+    board0_event_size: usize,
+    board1_event_size: usize,
     event_channel_buf: usize,
 }
 
 impl RunInfo {
     fn event_size(&self) -> usize {
-        self.board0_info.event_size + self.board1_info.event_size
-    }
-}
-
-#[derive(Default, Clone, Copy)]
-struct BoardInfo {
-    event_size: usize,
-    trigger_id: u32,
-    board_id: usize,
-}
-
-impl BoardInfo {
-    fn from(event: &BoardEvent) -> Self {
-        Self {
-            event_size: event.event.c_event.event_size,
-            trigger_id: event.event.c_event.trigger_id,
-            board_id: event.board_id,
-        }
+        self.board0_event_size + self.board1_event_size
     }
 }
 
@@ -377,7 +360,8 @@ fn event_processing(
     let mut queue1 = VecDeque::new();
     loop {
         match rx.recv_timeout(Duration::from_millis(100)) {
-            Ok(board_event) => {
+            Ok(mut board_event) => {
+                zero_suppress(&mut board_event);
                 match board_event.board_id {
                     0 => {
                         queue0.push_back(board_event);
@@ -387,7 +371,6 @@ fn event_processing(
                     }
                     _ => unreachable!(),
                 }
-                // zero_suppress(&mut board_event);
             }
             Err(RecvTimeoutError::Timeout) => {
                 // If no event is received within the timeout, check if it's time to print.
@@ -405,8 +388,8 @@ fn event_processing(
                 break;
             }
             let run_info = RunInfo {
-                board0_info: BoardInfo::from(&event0),
-                board1_info: BoardInfo::from(&event1),
+                board0_event_size: event0.event.c_event.event_size,
+                board1_event_size: event1.event.c_event.event_size,
                 event_channel_buf: rx.len(),
             };
             if tx_stats.send(run_info).is_err() {
