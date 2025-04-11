@@ -1,14 +1,14 @@
 use crate::{BoardEvent, Conf, Counter, EventWrapper, FELibReturn, HDF5Writer};
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use crossbeam_channel::{tick, unbounded, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::{
     buffer::Buffer,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Flex, Layout, Rect},
     style::Stylize,
     symbols::border,
     text::{Line, Text},
-    widgets::{Block, Paragraph, Widget},
+    widgets::{Block, Clear, Paragraph, Widget},
     DefaultTerminal, Frame,
 };
 use std::{
@@ -22,6 +22,20 @@ use std::{
     sync::{atomic::AtomicBool, Arc, Condvar, Mutex},
     thread,
 };
+
+#[derive(Debug)]
+#[allow(dead_code)]
+enum DaqError {
+    MisalignedEvents,
+    DroppedEvents,
+    FELib(FELibReturn),
+}
+
+impl From<FELibReturn> for DaqError {
+    fn from(value: FELibReturn) -> Self {
+        Self::FELib(value)
+    }
+}
 
 #[derive(Default, Clone, Copy)]
 struct RunInfo {
@@ -48,6 +62,7 @@ pub struct Status {
     pub config: Conf,
     pub boards: Vec<(usize, u64)>,
     pub max_runs: Option<usize>,
+    pub show_popup: Option<String>,
     pub exit: Option<StatusExit>,
 }
 
@@ -112,12 +127,46 @@ impl Status {
             }
             // join board threads
             for h in board_handles {
-                h.join().expect("board thread panic");
+                match h.join() {
+                    Err(_) => return Err(anyhow!("Data taking panic")),
+                    Ok(inner) => {
+                        if let Err(daq_err) = inner {
+                            match daq_err {
+                                DaqError::MisalignedEvents => {
+                                    self.show_popup = Some(String::from("Misaligned events"));
+                                }
+                                DaqError::DroppedEvents => {
+                                    self.show_popup = Some(String::from("Events dropped"))
+                                }
+                                DaqError::FELib(val) => self.show_popup = Some(val.to_string()),
+                            }
+                            terminal.draw(|f| self.draw(f))?;
+                            self.handle_error_event()?;
+                        }
+                    }
+                }
             }
             // drop tx_events so event thread will exit
             drop(tx_events);
             // wait for event‐processing to finish
-            ev_handle.join().expect("event thread panic")?;
+            match ev_handle.join() {
+                Err(_) => return Err(anyhow!("Event processing panic")),
+                Ok(inner) => {
+                    if let Err(daq_err) = inner {
+                        match daq_err {
+                            DaqError::MisalignedEvents => {
+                                self.show_popup = Some(String::from("Misaligned events"));
+                            }
+                            DaqError::DroppedEvents => {
+                                self.show_popup = Some(String::from("Events dropped"));
+                            }
+                            _ => {}
+                        }
+                        terminal.draw(|f| self.draw(f))?;
+                        self.handle_error_event()?;
+                    }
+                }
+            }
 
             // if user quit, break out of the outer loop
             if let Some(StatusExit::Quit) = self.exit {
@@ -152,6 +201,7 @@ impl Status {
             config,
             boards,
             max_runs,
+            show_popup: None,
             exit: None,
             buffer_len: 0,
         }
@@ -176,6 +226,19 @@ impl Status {
 
         let board1_status = self.board_status_paragraph(1);
         frame.render_widget(board1_status, inner_layout[1]);
+
+        if let Some(err) = &self.show_popup {
+            let block = Block::bordered().title("DAQ Error");
+            let daq_error = Paragraph::new(Text::from(err.as_str()))
+                .centered()
+                .block(block);
+            let vertical = Layout::vertical([Constraint::Percentage(20)]).flex(Flex::Center);
+            let horizontal = Layout::horizontal([Constraint::Percentage(60)]).flex(Flex::Center);
+            let [area] = vertical.areas(frame.area());
+            let [area] = horizontal.areas(area);
+            frame.render_widget(Clear, area); //this clears out the background
+            frame.render_widget(daq_error, area);
+        }
     }
 
     fn handle_events(&mut self) -> Result<()> {
@@ -187,6 +250,17 @@ impl Status {
                 _ => {}
             };
         }
+        Ok(())
+    }
+
+    fn handle_error_event(&mut self) -> Result<()> {
+        match event::read()? {
+            Event::Key(key_event) if key_event.kind == KeyEventKind::Press => {
+                self.handle_key_event(key_event)
+            }
+            _ => {}
+        }
+
         Ok(())
     }
 
@@ -251,8 +325,8 @@ impl Status {
         tx_stats: Sender<RunInfo>,
     ) -> Result<(
         Sender<BoardEvent>,
-        JoinHandle<Result<()>>,
-        Vec<JoinHandle<()>>,
+        JoinHandle<Result<(), DaqError>>,
+        Vec<JoinHandle<Result<(), DaqError>>>,
     )> {
         // Shared signal for acquisition start.
         let acq_start = Arc::new((Mutex::new(false), Condvar::new()));
@@ -280,7 +354,6 @@ impl Status {
                     endpoint_configured_clone,
                     shutdown_clone,
                 )
-                .unwrap_or_else(|e| eprintln!("Board {} error: {:?}", board_id, e));
             });
             board_thread_handles.push(handle);
         }
@@ -311,7 +384,7 @@ impl Status {
         // Spawn a dedicated thread to process incoming events and print global stats.
         let config_clone = self.config.clone();
         let shutdown_clone = Arc::clone(&shutdown);
-        let event_processing_handle = thread::spawn(move || -> Result<()> {
+        let event_processing_handle = thread::spawn(move || -> Result<(), DaqError> {
             event_processing(rx_events, tx_stats, run_file, config_clone, shutdown_clone)
         });
 
@@ -414,11 +487,12 @@ fn event_processing(
     run_file: PathBuf,
     config: Conf,
     shutdown: Arc<AtomicBool>,
-) -> Result<()> {
+) -> Result<(), DaqError> {
     let mut writer =
         HDF5Writer::new(run_file, 64, config.board_settings.record_len, 7500, 50).unwrap();
     let mut queue0 = VecDeque::new();
     let mut queue1 = VecDeque::new();
+    let mut prev_trig_id = 0;
     loop {
         match rx.recv_timeout(Duration::from_millis(100)) {
             Ok(mut board_event) => {
@@ -444,10 +518,15 @@ fn event_processing(
         if queue0.front().is_some() && queue1.front().is_some() {
             let event0 = queue0.pop_front().unwrap();
             let event1 = queue1.pop_front().unwrap();
-            if event0.event.c_event.trigger_id != event1.event.c_event.trigger_id {
-                println!("Events misaligned. Quitting DAQ.");
-                break;
+            let curr_trig0 = event0.event.c_event.trigger_id;
+            let curr_trig1 = event1.event.c_event.trigger_id;
+            if curr_trig0 != curr_trig1 {
+                return Err(DaqError::MisalignedEvents);
             }
+            if curr_trig0 != prev_trig_id + 1 {
+                return Err(DaqError::DroppedEvents);
+            }
+            prev_trig_id += 1;
             let run_info = RunInfo {
                 board0_event_size: event0.event.c_event.event_size,
                 board1_event_size: event1.event.c_event.event_size,
@@ -492,7 +571,7 @@ fn data_taking_thread(
     acq_start: Arc<(Mutex<bool>, Condvar)>,
     endpoint_configured: Arc<(Mutex<u32>, Condvar)>,
     shutdown: Arc<AtomicBool>,
-) -> Result<(), FELibReturn> {
+) -> Result<(), DaqError> {
     // Set up endpoint.
     let mut ep_handle = 0;
     let mut ep_folder_handle = 0;
@@ -528,8 +607,7 @@ fn data_taking_thread(
         if shutdown.load(Ordering::SeqCst) {
             break;
         }
-        let ret = crate::felib_readdata(ep_handle, &mut event);
-        match ret {
+        match crate::felib_readdata(ep_handle, &mut event) {
             FELibReturn::Success => {
                 // Instead of allocating a new EventWrapper,
                 // swap out the current one using std::mem::replace.
@@ -549,6 +627,8 @@ fn data_taking_thread(
             _ => (),
         }
     }
+
+    drop(tx);
     Ok(())
 }
 
