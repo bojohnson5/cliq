@@ -12,6 +12,7 @@ use ratatui::{
     DefaultTerminal, Frame,
 };
 use std::{
+    collections::VecDeque,
     fs::DirEntry,
     path::PathBuf,
     time::{Duration, Instant},
@@ -24,22 +25,15 @@ use std::{
 
 #[derive(Default, Clone, Copy)]
 struct RunInfo {
-    board0_info: BoardInfo,
-    board1_info: BoardInfo,
+    board0_event_size: usize,
+    board1_event_size: usize,
     event_channel_buf: usize,
 }
 
 impl RunInfo {
     fn event_size(&self) -> usize {
-        self.board0_info.event_size + self.board1_info.event_size
+        self.board0_event_size + self.board1_event_size
     }
-}
-
-#[derive(Default, Clone, Copy)]
-struct BoardInfo {
-    event_size: usize,
-    trigger_id: u32,
-    board_id: usize,
 }
 
 #[derive(Debug)]
@@ -362,51 +356,20 @@ fn event_processing(
 ) -> Result<()> {
     let mut writer =
         HDF5Writer::new(run_file, 64, config.board_settings.record_len, 7500, 50).unwrap();
-    let mut run_info = RunInfo::default();
-    let mut events = Vec::with_capacity(4);
+    let mut queue0 = VecDeque::new();
+    let mut queue1 = VecDeque::new();
     loop {
         match rx.recv_timeout(Duration::from_millis(100)) {
             Ok(mut board_event) => {
+                zero_suppress(&mut board_event);
                 match board_event.board_id {
                     0 => {
-                        run_info.board0_info.event_size = board_event.event.c_event.event_size;
-                        run_info.board0_info.board_id = 0;
-                        run_info.board0_info.trigger_id = board_event.event.c_event.trigger_id;
-                        run_info.event_channel_buf += rx.len();
+                        queue0.push_back(board_event);
                     }
                     1 => {
-                        run_info.board1_info.event_size = board_event.event.c_event.event_size;
-                        run_info.board1_info.board_id = 1;
-                        run_info.board1_info.trigger_id = board_event.event.c_event.trigger_id;
-                        run_info.event_channel_buf += rx.len();
+                        queue1.push_back(board_event);
                     }
                     _ => unreachable!(),
-                }
-                zero_suppress(&mut board_event);
-                events.push(board_event);
-                if events.len() == 2 {
-                    if tx_stats.send(run_info).is_err() {
-                        break;
-                    }
-                    if run_info.board0_info.trigger_id != run_info.board1_info.trigger_id {
-                        break;
-                    }
-                    writer
-                        .append_event(
-                            events[0].board_id,
-                            events[0].event.c_event.timestamp,
-                            &events[0].event.waveform_data,
-                        )
-                        .unwrap();
-                    writer
-                        .append_event(
-                            events[1].board_id,
-                            events[1].event.c_event.timestamp,
-                            &events[1].event.waveform_data,
-                        )
-                        .unwrap();
-                    run_info = RunInfo::default();
-                    events.clear();
                 }
             }
             Err(RecvTimeoutError::Timeout) => {
@@ -416,6 +379,36 @@ fn event_processing(
                 writer.flush_all().unwrap();
                 break;
             }
+        }
+        if queue0.front().is_some() && queue1.front().is_some() {
+            let event0 = queue0.pop_front().unwrap();
+            let event1 = queue1.pop_front().unwrap();
+            if event0.event.c_event.trigger_id != event1.event.c_event.trigger_id {
+                println!("Events misaligned. Quitting DAQ.");
+                break;
+            }
+            let run_info = RunInfo {
+                board0_event_size: event0.event.c_event.event_size,
+                board1_event_size: event1.event.c_event.event_size,
+                event_channel_buf: rx.len(),
+            };
+            if tx_stats.send(run_info).is_err() {
+                break;
+            }
+            writer
+                .append_event(
+                    event0.board_id,
+                    event0.event.c_event.timestamp,
+                    &event0.event.waveform_data,
+                )
+                .unwrap();
+            writer
+                .append_event(
+                    event1.board_id,
+                    event1.event.c_event.timestamp,
+                    &event1.event.waveform_data,
+                )
+                .unwrap();
         }
         if shutdown.load(Ordering::SeqCst) {
             writer.flush_all().unwrap();
