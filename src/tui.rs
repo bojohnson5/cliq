@@ -4,7 +4,7 @@ use crossbeam_channel::{tick, unbounded, Receiver, RecvTimeoutError, Sender, Try
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::{
     buffer::Buffer,
-    layout::Rect,
+    layout::{Constraint, Direction, Layout, Rect},
     style::Stylize,
     symbols::border,
     text::{Line, Text},
@@ -158,7 +158,24 @@ impl Status {
     }
 
     fn draw(&self, frame: &mut Frame) {
-        frame.render_widget(self, frame.area());
+        let outer_layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints(vec![Constraint::Percentage(50), Constraint::Percentage(50)])
+            .split(frame.area());
+
+        let inner_layout = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints(vec![Constraint::Percentage(50), Constraint::Percentage(50)])
+            .split(outer_layout[1]);
+
+        let run_stats = self.run_stats_paragraph();
+        frame.render_widget(run_stats, outer_layout[0]);
+
+        let board0_status = self.board_status_paragraph(0);
+        frame.render_widget(board0_status, inner_layout[0]);
+
+        let board1_status = self.board_status_paragraph(1);
+        frame.render_widget(board1_status, inner_layout[1]);
     }
 
     fn handle_events(&mut self) -> Result<()> {
@@ -182,6 +199,50 @@ impl Status {
 
     fn exit(&mut self) {
         self.exit = Some(StatusExit::Quit);
+    }
+
+    fn run_stats_paragraph(&self) -> Paragraph {
+        let title =
+            Line::from(format!(" Campaign {} Run {} Status ", self.camp_num, self.run_num).bold());
+        let instructrions = Line::from(vec![" Quit ".into(), "<Q> ".blue().bold()]);
+        let block = Block::bordered()
+            .title(title.centered())
+            .title_bottom(instructrions.centered())
+            .border_set(border::THICK);
+
+        let status_text = Text::from(vec![Line::from(vec![
+            "Elapsed time: ".into(),
+            self.counter
+                .t_begin
+                .elapsed()
+                .as_secs()
+                .to_string()
+                .yellow(),
+            " s".into(),
+            " Events: ".into(),
+            self.counter.n_events.to_string().yellow(),
+            " Data rate: ".into(),
+            format!("{:.2}", self.counter.rate()).yellow(),
+            " MB/s ".into(),
+            " Buffer length: ".into(),
+            self.buffer_len.to_string().yellow(),
+        ])]);
+
+        Paragraph::new(status_text).centered().block(block)
+    }
+
+    fn board_status_paragraph(&self, board: usize) -> Paragraph {
+        let title = Line::from(format!(" Board {} Status ", self.boards[board].0).bold());
+        let block = Block::bordered()
+            .title(title.centered())
+            .border_set(border::THICK);
+        let handle = self.boards[board].1;
+        let status_text = match crate::felib_getvalue(handle, "/par/LostTriggerCnt") {
+            Ok(s) => Text::from(format!("Lost trigger count: {}", s).yellow()),
+            Err(_) => Text::from("err".yellow()),
+        };
+
+        Paragraph::new(status_text).centered().block(block)
     }
 
     fn begin_run(
