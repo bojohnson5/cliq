@@ -3,12 +3,11 @@ use anyhow::{anyhow, Result};
 use crossbeam_channel::{tick, unbounded, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::{
-    buffer::Buffer,
-    layout::{Constraint, Direction, Flex, Layout, Rect},
+    layout::{Constraint, Direction, Flex, Layout},
     style::Stylize,
     symbols::border,
     text::{Line, Text},
-    widgets::{Block, Clear, Paragraph, Widget},
+    widgets::{Block, Clear, Paragraph},
     DefaultTerminal, Frame,
 };
 use std::{
@@ -311,9 +310,22 @@ impl Status {
             .title(title.centered())
             .border_set(border::THICK);
         let handle = self.boards[board].1;
-        let status_text = match crate::felib_getvalue(handle, "/par/LostTriggerCnt") {
-            Ok(s) => Text::from(format!("Lost trigger count: {}", s).yellow()),
-            Err(_) => Text::from("err".yellow()),
+        let mut status_text = vec![];
+        match crate::felib_getvalue(handle, "/par/RealtimeMonitor") {
+            Ok(s) => status_text.push(Line::from(format!("Realtime Monitor: {}", s).yellow())),
+            Err(_) => status_text.push(Line::from("err".yellow())),
+        };
+        match crate::felib_getvalue(handle, "/par/DeadtimeMonitor") {
+            Ok(s) => status_text.push(Line::from(format!("Deadtime Monitor: {}", s).yellow())),
+            Err(_) => status_text.push(Line::from("err".yellow())),
+        };
+        match crate::felib_getvalue(handle, "/par/TriggerCnt") {
+            Ok(s) => status_text.push(Line::from(format!("Trigger count: {}", s).yellow())),
+            Err(_) => status_text.push(Line::from("err".yellow())),
+        };
+        match crate::felib_getvalue(handle, "/par/LostTriggerCnt") {
+            Ok(s) => status_text.push(Line::from(format!("Lost trigger count: {}", s).yellow())),
+            Err(_) => status_text.push(Line::from("Lost trigger count: err in read".yellow())),
         };
 
         Paragraph::new(status_text).centered().block(block)
@@ -443,41 +455,6 @@ impl Status {
         }
 
         Ok(path)
-    }
-}
-
-impl Widget for &Status {
-    fn render(self, area: Rect, buf: &mut Buffer) {
-        let title =
-            Line::from(format!(" Campaign {} Run {} Status ", self.camp_num, self.run_num).bold());
-        let instructrions = Line::from(vec![" Quit ".into(), "<Q> ".blue().bold()]);
-        let block = Block::bordered()
-            .title(title.centered())
-            .title_bottom(instructrions.centered())
-            .border_set(border::THICK);
-
-        let status_text = Text::from(vec![Line::from(vec![
-            "Elapsed time: ".into(),
-            self.counter
-                .t_begin
-                .elapsed()
-                .as_secs()
-                .to_string()
-                .yellow(),
-            " s".into(),
-            " Events: ".into(),
-            self.counter.n_events.to_string().yellow(),
-            " Data rate: ".into(),
-            format!("{:.2}", self.counter.rate()).yellow(),
-            " MB/s ".into(),
-            " Buffer length: ".into(),
-            self.buffer_len.to_string().yellow(),
-        ])]);
-
-        Paragraph::new(status_text)
-            .centered()
-            .block(block)
-            .render(area, buf);
     }
 }
 
