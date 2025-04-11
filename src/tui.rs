@@ -1,6 +1,6 @@
 use crate::{BoardEvent, Conf, Counter, EventWrapper, FELibReturn, HDF5Writer};
 use anyhow::Result;
-use crossbeam_channel::{tick, unbounded, Receiver, RecvTimeoutError, Sender};
+use crossbeam_channel::{tick, unbounded, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::{
     buffer::Buffer,
@@ -66,9 +66,9 @@ pub enum StatusExit {
 impl Status {
     pub fn run(&mut self, terminal: &mut DefaultTerminal) -> Result<()> {
         let ticker = tick(Duration::from_secs(1));
+        let max_runs = self.max_runs.unwrap_or(0);
 
         loop {
-            self.curr_run += 1;
             self.t_begin = Instant::now();
             self.exit = None;
             self.counter.reset();
@@ -83,6 +83,16 @@ impl Status {
                 let _ = ticker.recv();
 
                 // Drain stats channel
+                match rx_stats.try_recv() {
+                    Ok(run_info) => {
+                        self.counter.increment(run_info.event_size());
+                        self.buffer_len = run_info.event_channel_buf;
+                    }
+                    Err(TryRecvError::Empty) => {}
+                    Err(TryRecvError::Disconnected) => {
+                        self.exit = Some(StatusExit::Quit);
+                    }
+                }
                 while let Ok(run_info) = rx_stats.try_recv() {
                     self.counter.increment(run_info.event_size());
                     self.buffer_len = run_info.event_channel_buf;
@@ -117,6 +127,14 @@ impl Status {
 
             // if user quit, break out of the outer loop
             if let Some(StatusExit::Quit) = self.exit {
+                // Close all boards
+                for &(_, dev_handle) in &self.boards {
+                    crate::felib_close(dev_handle)?;
+                }
+                return Ok(());
+            }
+            self.curr_run += 1;
+            if self.curr_run == max_runs && max_runs != 0 {
                 // Close all boards
                 for &(_, dev_handle) in &self.boards {
                     crate::felib_close(dev_handle)?;
@@ -371,7 +389,6 @@ fn event_processing(
                         break;
                     }
                     if run_info.board0_info.trigger_id != run_info.board1_info.trigger_id {
-                        println!("Trigger IDs don't align. Quitting DAQ.");
                         break;
                     }
                     writer
