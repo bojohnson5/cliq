@@ -317,19 +317,23 @@ impl Status {
         let mut status_text = vec![];
         match crate::felib_getvalue(handle, "/par/RealtimeMonitor") {
             Ok(s) => status_text.push(Line::from(format!("Realtime Monitor: {}", s).yellow())),
-            Err(_) => status_text.push(Line::from("err".yellow())),
+            Err(_) => status_text.push(Line::from("Realtime monitor: err in read".yellow())),
         };
         match crate::felib_getvalue(handle, "/par/DeadtimeMonitor") {
             Ok(s) => status_text.push(Line::from(format!("Deadtime Monitor: {}", s).yellow())),
-            Err(_) => status_text.push(Line::from("err".yellow())),
+            Err(_) => status_text.push(Line::from("Deadtime monitor: err in read".yellow())),
         };
         match crate::felib_getvalue(handle, "/par/TriggerCnt") {
             Ok(s) => status_text.push(Line::from(format!("Trigger count: {}", s).yellow())),
-            Err(_) => status_text.push(Line::from("err".yellow())),
+            Err(_) => status_text.push(Line::from("Trigger counts: err in read".yellow())),
         };
         match crate::felib_getvalue(handle, "/par/LostTriggerCnt") {
             Ok(s) => status_text.push(Line::from(format!("Lost trigger count: {}", s).yellow())),
             Err(_) => status_text.push(Line::from("Lost trigger count: err in read".yellow())),
+        };
+        match crate::felib_getvalue(handle, "/par/AcquisitionStatus") {
+            Ok(s) => status_text.push(Line::from(format!("Acquisition status: {}", s).yellow())),
+            Err(_) => status_text.push(Line::from("Acquisition status: err in read".yellow())),
         };
 
         Paragraph::new(status_text).centered().block(block)
