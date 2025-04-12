@@ -1,12 +1,12 @@
 use crate::{BoardEvent, Conf, Counter, EventWrapper, FELibReturn, HDF5Writer};
 use anyhow::{anyhow, Result};
-use crossbeam_channel::{tick, unbounded, Receiver, RecvTimeoutError, Sender, TryRecvError};
+use crossbeam_channel::{tick, unbounded, Receiver, RecvError, Sender};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::{
     layout::{Constraint, Direction, Flex, Layout},
-    style::Stylize,
+    style::{Color, Style, Stylize},
     symbols::border,
-    text::{Line, Text},
+    text::{Line, Span, Text},
     widgets::{Block, Clear, Paragraph},
     DefaultTerminal, Frame,
 };
@@ -91,16 +91,6 @@ impl Status {
                 let _ = ticker.recv();
 
                 // Drain stats channel
-                match rx_stats.try_recv() {
-                    Ok(run_info) => {
-                        self.counter.increment(run_info.event_size());
-                        self.buffer_len = run_info.event_channel_buf;
-                    }
-                    Err(TryRecvError::Empty) => {}
-                    Err(TryRecvError::Disconnected) => {
-                        self.exit = Some(StatusExit::Quit);
-                    }
-                }
                 while let Ok(run_info) = rx_stats.try_recv() {
                     self.counter.increment(run_info.event_size());
                     self.buffer_len = run_info.event_channel_buf;
@@ -332,7 +322,24 @@ impl Status {
             Err(_) => status_text.push(Line::from("Lost trigger count: err in read".yellow())),
         };
         match crate::felib_getvalue(handle, "/par/AcquisitionStatus") {
-            Ok(s) => status_text.push(Line::from(format!("Acquisition status: {}", s).yellow())),
+            Ok(s) => {
+                // parse the status code as a number, then format as binary string
+                let bin = format!("{:b}", s.parse::<u32>().unwrap());
+
+                // build a Spans line: first the label, then one Span per bit
+                let mut spans = Vec::with_capacity(1 + bin.len());
+                spans.push(Span::raw("Acquisition status: "));
+                spans.extend(bin.chars().map(|c| {
+                    let (color, label) = match c {
+                        '1' => (Color::Red, "●"),
+                        '0' => (Color::White, "●"),
+                        _ => (Color::White, "?"),
+                    };
+                    Span::styled(label, Style::default().fg(color))
+                }));
+
+                status_text.push(Line::from(spans));
+            }
             Err(_) => status_text.push(Line::from("Acquisition status: err in read".yellow())),
         };
 
@@ -479,7 +486,7 @@ fn event_processing(
     let mut queue1 = VecDeque::new();
     let mut curr_trig_id = 0;
     loop {
-        match rx.recv_timeout(Duration::from_millis(100)) {
+        match rx.recv() {
             Ok(mut board_event) => {
                 zero_suppress(&mut board_event);
                 match board_event.board_id {
@@ -492,10 +499,7 @@ fn event_processing(
                     _ => unreachable!(),
                 }
             }
-            Err(RecvTimeoutError::Timeout) => {
-                // If no event is received within the timeout, check if it's time to print.
-            }
-            Err(RecvTimeoutError::Disconnected) => {
+            Err(RecvError) => {
                 writer.flush_all().unwrap();
                 break;
             }
