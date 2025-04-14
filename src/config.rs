@@ -14,6 +14,7 @@ pub struct Conf {
 
 #[derive(Config, Debug, Clone)]
 pub struct RunSettings {
+    pub boards: Vec<String>,
     pub run_duration: u64,
     pub output_dir: String,
     pub campaign_num: usize,

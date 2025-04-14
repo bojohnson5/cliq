@@ -328,7 +328,7 @@ impl Status {
 
                 // build a Spans line: first the label, then one Span per bit
                 let mut spans = Vec::with_capacity(1 + bin.len());
-                spans.push(Span::raw("Acquisition status: "));
+                spans.push(Span::raw("Acquisition status: ").yellow());
                 spans.extend(bin.chars().map(|c| {
                     let (color, label) = match c {
                         '1' => (Color::Red, "●"),
@@ -480,8 +480,15 @@ fn event_processing(
     config: Conf,
     shutdown: Arc<AtomicBool>,
 ) -> Result<(), DaqError> {
-    let mut writer =
-        HDF5Writer::new(run_file, 64, config.board_settings.record_len, 7500, 50).unwrap();
+    let mut writer = HDF5Writer::new(
+        run_file,
+        64,
+        config.board_settings.record_len,
+        config.run_settings.boards.len(),
+        7500,
+        50,
+    )
+    .unwrap();
     let mut queue0 = VecDeque::new();
     let mut queue1 = VecDeque::new();
     let mut curr_trig_id = 0;

@@ -6,8 +6,7 @@ use std::path::PathBuf;
 /// HDF5Writer creates two groups (one per board) and routes events accordingly.
 pub struct HDF5Writer {
     pub file: File,
-    pub board0: BoardData,
-    pub board1: BoardData,
+    pub boards: Vec<BoardData>,
     n_channels: usize,
     n_samples: usize,
     max_events_per_board: usize,
@@ -21,6 +20,7 @@ impl HDF5Writer {
         filename: PathBuf,
         n_channels: usize,
         n_samples: usize,
+        n_boards: usize,
         max_events_per_board: usize,
         buffer_capacity: usize,
     ) -> Result<Self> {
@@ -29,18 +29,18 @@ impl HDF5Writer {
         blosc_set_nthreads(10);
 
         // Create BoardData for each board.
-        let (board0, board1) = Self::create_boards(
+        let boards = Self::create_boards(
             &file,
             n_channels,
             n_samples,
+            n_boards,
             max_events_per_board,
             buffer_capacity,
         )?;
 
         Ok(Self {
             file,
-            board0,
-            board1,
+            boards,
             n_channels,
             n_samples,
             max_events_per_board,
@@ -54,14 +54,18 @@ impl HDF5Writer {
         file: &File,
         n_channels: usize,
         n_samples: usize,
+        n_boards: usize,
         max_events: usize,
         buffer_capacity: usize,
-    ) -> Result<(BoardData, BoardData)> {
-        let group0 = file.create_group("board0")?;
-        let group1 = file.create_group("board1")?;
-        let board0 = BoardData::new(&group0, n_channels, n_samples, max_events, buffer_capacity)?;
-        let board1 = BoardData::new(&group1, n_channels, n_samples, max_events, buffer_capacity)?;
-        Ok((board0, board1))
+    ) -> Result<Vec<BoardData>> {
+        let groups: Vec<Group> = (0..n_boards)
+            .map(|board| file.create_group(&format!("board{}", board)))
+            .collect::<Result<_, _>>()?;
+        let boards: Vec<BoardData> = groups
+            .iter()
+            .map(|group| BoardData::new(group, n_channels, n_samples, max_events, buffer_capacity))
+            .collect::<Result<_, _>>()?;
+        Ok(boards)
     }
 
     /// Append an event for the specified board (0 or 1) along with its timestamp.
@@ -71,20 +75,12 @@ impl HDF5Writer {
         timestamp: u64,
         event_data: &Array2<u16>,
     ) -> Result<()> {
-        let result = match board {
-            0 => self.board0.append_event(timestamp, event_data),
-            1 => self.board1.append_event(timestamp, event_data),
-            _ => Err(anyhow!("Invalid board number")),
-        };
+        let result = self.boards[board].append_event(timestamp, event_data);
 
         if let Err(e) = result {
             if e.to_string().contains("Maximum number of events reached") {
                 self.rollover()?;
-                return match board {
-                    0 => self.board0.append_event(timestamp, event_data),
-                    1 => self.board1.append_event(timestamp, event_data),
-                    _ => Err(anyhow!("Invalid board number")),
-                };
+                return self.boards[board].append_event(timestamp, event_data);
             } else {
                 return Err(e);
             }
@@ -95,16 +91,20 @@ impl HDF5Writer {
 
     /// Flush any remaining buffered events for both boards.
     pub fn flush_all(&mut self) -> Result<()> {
-        self.board0.flush()?;
-        self.board1.flush()?;
+        for board in self.boards.iter_mut() {
+            board.flush()?;
+        }
         Ok(())
     }
 
     /// Rollover the current file:
     pub fn rollover(&mut self) -> Result<()> {
         // Retrieve the buffered events from each board (but do not flush them to disk in the current file).
-        let (ts0, wf0, count0) = self.board0.take_buffer();
-        let (ts1, wf1, count1) = self.board1.take_buffer();
+        let vals: Vec<(Array2<u64>, Array3<u16>, usize)> = self
+            .boards
+            .iter_mut()
+            .map(|board| board.take_buffer())
+            .collect();
 
         // Flush any fully accumulated events in the buffers (if needed) so that we start fresh.
         // (You might decide to handle partially full buffers as shown below.)
@@ -120,26 +120,26 @@ impl HDF5Writer {
         // Create new file.
         let new_file = File::create(&new_path)?;
         // Create new groups and board data.
-        let (new_board0, new_board1) = Self::create_boards(
+        let new_boards = Self::create_boards(
             &new_file,
             self.n_channels,
             self.n_samples,
+            self.boards.len(),
             self.max_events_per_board,
             self.buffer_capacity,
         )?;
 
         // Replace the current file and boards.
         self.file = new_file;
-        self.board0 = new_board0;
-        self.board1 = new_board1;
+        self.boards = new_boards;
 
         // Write the buffered events into the new file.
-        if count0 > 0 {
-            self.board0.append_buffer(ts0, wf0, count0)?;
+        for (i, (ts, wf, count)) in vals.into_iter().enumerate() {
+            if count > 0 {
+                self.boards[i].append_buffer(ts, wf, count)?;
+            }
         }
-        if count1 > 0 {
-            self.board1.append_buffer(ts1, wf1, count1)?;
-        }
+
         Ok(())
     }
 }

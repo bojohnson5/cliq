@@ -18,7 +18,7 @@ fn main() -> Result<()> {
     let config = Conf::from_file(args.config)?;
 
     // List of board connection strings. Add as many as needed.
-    let board_urls = vec!["dig2://caendgtz-usb-25380", "dig2://caendgtz-usb-25379"];
+    let board_urls = &config.run_settings.boards;
 
     // Open boards and store their handles along with an assigned board ID.
     let mut boards = Vec::new();
