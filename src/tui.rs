@@ -84,12 +84,28 @@ impl Status {
             self.counter.reset();
             self.buffer_len = 0;
 
+            // Reset the boards and reconfigure everything for next run
+            for &(_, dev_handle) in &self.boards {
+                crate::felib_sendcommand(dev_handle, "/cmd/reset")?;
+            }
+            for &(_, dev_handle) in &self.boards {
+                crate::configure_board(dev_handle, &self.config)?;
+            }
+            for &(i, dev_handle) in &self.boards {
+                crate::configure_sync(
+                    dev_handle,
+                    i as isize,
+                    self.boards.len() as isize,
+                    &self.config,
+                )?;
+            }
+
             let shutdown = Arc::new(AtomicBool::new(false));
             let (tx_stats, rx_stats) = unbounded();
             let (tx_events, ev_handle, board_handles) =
                 self.begin_run(Arc::clone(&shutdown), tx_stats)?;
 
-            while self.exit.is_none() {
+            while self.exit.is_none() && !shutdown.load(Ordering::SeqCst) {
                 let _ = ticker.recv();
 
                 // Drain stats channel
@@ -125,21 +141,21 @@ impl Status {
                             match daq_err {
                                 DaqError::MisalignedEvents => {
                                     self.show_popup =
-                                        Some(String::from("Misaligned events. Quitting DAQ."));
+                                        Some(String::from("Misaligned events. Quitting DAQ.\n<q> to exit."));
                                 }
                                 DaqError::DroppedEvents => {
                                     self.show_popup =
-                                        Some(String::from("Events dropped. Quitting DAQ."))
+                                        Some(String::from("Events dropped. Quitting DAQ.\n<q> to exit."))
                                 }
                                 DaqError::FELib(val) => self.show_popup = Some(val.to_string()),
                                 DaqError::DataTakingTransit => {
                                     self.show_popup = Some(String::from(
-                                        "Data taking pipeline error. Quitting DAQ.",
+                                        "Data taking pipeline error. Quitting DAQ.\n<q> to exit.",
                                     ))
                                 }
                                 DaqError::EventProcessingTransit => {
                                     self.show_popup = Some(String::from(
-                                        "Event processing stats pipeline error. Quitting DAQ.",
+                                        "Event processing stats pipeline error. Quitting DAQ.\n<q> to exit.",
                                     ))
                                 }
                             }
@@ -158,12 +174,14 @@ impl Status {
                     if let Err(daq_err) = inner {
                         match daq_err {
                             DaqError::MisalignedEvents => {
-                                self.show_popup =
-                                    Some(String::from("Misaligned events. Quitting DAQ."));
+                                self.show_popup = Some(String::from(
+                                    "Misaligned events. Quitting DAQ.\n<q> to exit.",
+                                ));
                             }
                             DaqError::DroppedEvents => {
-                                self.show_popup =
-                                    Some(String::from("Events dropped. Quitting DAQ."));
+                                self.show_popup = Some(String::from(
+                                    "Events dropped. Quitting DAQ.\n<q> to exit.",
+                                ));
                             }
                             _ => {}
                         }
