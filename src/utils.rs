@@ -1,4 +1,4 @@
-use crate::EventWrapper;
+use crate::{ChannelConfig, Conf, DCOffsetConfig, EventWrapper, FELibReturn};
 use std::{
     collections::VecDeque,
     time::{Duration, Instant},
@@ -107,4 +107,142 @@ impl Counter {
         self.events.clear();
         self.bytes_in_window = 0;
     }
+}
+
+pub fn configure_board(handle: u64, config: &Conf) -> Result<(), FELibReturn> {
+    match config.board_settings.en_chans {
+        ChannelConfig::All(_) => {
+            crate::felib_setvalue(handle, "/ch/0..63/par/ChEnable", "true")?;
+        }
+        ChannelConfig::List(ref channels) => {
+            for channel in channels {
+                let path = format!("/ch/{}/par/ChEnable", channel);
+                crate::felib_setvalue(handle, &path, "true")?;
+            }
+        }
+    }
+    match config.board_settings.dc_offset {
+        DCOffsetConfig::Global(offset) => {
+            crate::felib_setvalue(handle, "/ch/0..63/par/DCOffset", &offset.to_string())?;
+        }
+        DCOffsetConfig::PerChannel(ref map) => {
+            for (chan, offset) in map {
+                let path = format!("/ch/{}/par/DCOffset", chan);
+
+                crate::felib_setvalue(handle, &path, &offset.to_string())?;
+            }
+        }
+    }
+    crate::felib_setvalue(
+        handle,
+        "/par/RecordLengthS",
+        &config.board_settings.record_len.to_string(),
+    )?;
+    crate::felib_setvalue(
+        handle,
+        "/par/PreTriggerS",
+        &config.board_settings.pre_trig_len.to_string(),
+    )?;
+    crate::felib_setvalue(
+        handle,
+        "/par/AcqTriggerSource",
+        &config.board_settings.trig_source,
+    )?;
+    crate::felib_setvalue(handle, "/par/IOlevel", &config.board_settings.io_level)?;
+    crate::felib_setvalue(handle, "/par/TestPulsePeriod", "8333333")?;
+    crate::felib_setvalue(handle, "/par/TestPulseWidth", "1000")?;
+    crate::felib_setvalue(handle, "/par/TestPulseLowLevel", "0")?;
+    crate::felib_setvalue(handle, "/par/TestPulseHighLevel", "10000")?;
+
+    Ok(())
+}
+
+pub fn configure_sync(
+    handle: u64,
+    board_id: isize,
+    num_boards: isize,
+    config: &Conf,
+) -> Result<(), FELibReturn> {
+    let first_board = board_id == 0;
+
+    crate::felib_setvalue(
+        handle,
+        "/par/ClockSource",
+        if first_board {
+            &config.sync_settings.primary_clock_src
+        } else {
+            &config.sync_settings.secondary_clock_src
+        },
+    )?;
+    crate::felib_setvalue(
+        handle,
+        "/par/SyncOutMode",
+        if first_board {
+            &config.sync_settings.primary_sync_out
+        } else {
+            &config.sync_settings.secondary_sync_out
+        },
+    )?;
+    crate::felib_setvalue(
+        handle,
+        "/par/StartSource",
+        if first_board {
+            &config.sync_settings.primary_start_source
+        } else {
+            &config.sync_settings.secondary_start_source
+        },
+    )?;
+    crate::felib_setvalue(
+        handle,
+        "/par/EnClockOutFP",
+        if first_board {
+            &config.sync_settings.primary_clock_out_fp
+        } else {
+            &config.sync_settings.secondary_clock_out_fp
+        },
+    )?;
+    crate::felib_setvalue(
+        handle,
+        "/par/EnAutoDisarmAcq",
+        &config.sync_settings.auto_disarm,
+    )?;
+    crate::felib_setvalue(handle, "/par/TrgOutMode", &config.sync_settings.trig_out)?;
+
+    let run_delay = get_run_delay(board_id, num_boards);
+    let clock_out_delay = get_clock_out_delay(board_id, num_boards);
+    crate::felib_setvalue(handle, "/par/RunDelay", &run_delay.to_string())?;
+    crate::felib_setvalue(
+        handle,
+        "/par/VolatileClockOutDelay",
+        &clock_out_delay.to_string(),
+    )?;
+
+    Ok(())
+}
+
+fn get_clock_out_delay(board_id: isize, num_boards: isize) -> isize {
+    let first_board = board_id == 0;
+    let last_board = board_id == num_boards - 1;
+
+    if last_board {
+        0
+    } else if first_board {
+        // -2148
+        -2188
+    } else {
+        -3111
+    }
+}
+
+fn get_run_delay(board_id: isize, num_boards: isize) -> isize {
+    let first_board = board_id == 0;
+    let board_id_from_last = num_boards - board_id - 1;
+
+    let mut run_delay_clk = 2 * board_id_from_last;
+
+    if first_board {
+        run_delay_clk += 4;
+    }
+
+    run_delay_clk * 8
 }

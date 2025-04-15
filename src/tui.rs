@@ -27,6 +27,8 @@ use std::{
 enum DaqError {
     MisalignedEvents,
     DroppedEvents,
+    DataTakingTransit,
+    EventProcessingTransit,
     FELib(FELibReturn),
 }
 
@@ -82,12 +84,28 @@ impl Status {
             self.counter.reset();
             self.buffer_len = 0;
 
+            // Reset the boards and reconfigure everything for next run
+            for &(_, dev_handle) in &self.boards {
+                crate::felib_sendcommand(dev_handle, "/cmd/reset")?;
+            }
+            for &(_, dev_handle) in &self.boards {
+                crate::configure_board(dev_handle, &self.config)?;
+            }
+            for &(i, dev_handle) in &self.boards {
+                crate::configure_sync(
+                    dev_handle,
+                    i as isize,
+                    self.boards.len() as isize,
+                    &self.config,
+                )?;
+            }
+
             let shutdown = Arc::new(AtomicBool::new(false));
             let (tx_stats, rx_stats) = unbounded();
             let (tx_events, ev_handle, board_handles) =
                 self.begin_run(Arc::clone(&shutdown), tx_stats)?;
 
-            while self.exit.is_none() {
+            while self.exit.is_none() && !shutdown.load(Ordering::SeqCst) {
                 let _ = ticker.recv();
 
                 // Drain stats channel
@@ -123,13 +141,23 @@ impl Status {
                             match daq_err {
                                 DaqError::MisalignedEvents => {
                                     self.show_popup =
-                                        Some(String::from("Misaligned events. Quitting DAQ."));
+                                        Some(String::from("Misaligned events. Quitting DAQ.\n<q> to exit."));
                                 }
                                 DaqError::DroppedEvents => {
                                     self.show_popup =
-                                        Some(String::from("Events dropped. Quitting DAQ."))
+                                        Some(String::from("Events dropped. Quitting DAQ.\n<q> to exit."))
                                 }
                                 DaqError::FELib(val) => self.show_popup = Some(val.to_string()),
+                                DaqError::DataTakingTransit => {
+                                    self.show_popup = Some(String::from(
+                                        "Data taking pipeline error. Quitting DAQ.\n<q> to exit.",
+                                    ))
+                                }
+                                DaqError::EventProcessingTransit => {
+                                    self.show_popup = Some(String::from(
+                                        "Event processing stats pipeline error. Quitting DAQ.\n<q> to exit.",
+                                    ))
+                                }
                             }
                             terminal.draw(|f| self.draw(f))?;
                             self.handle_error_event()?;
@@ -146,12 +174,14 @@ impl Status {
                     if let Err(daq_err) = inner {
                         match daq_err {
                             DaqError::MisalignedEvents => {
-                                self.show_popup =
-                                    Some(String::from("Misaligned events. Quitting DAQ."));
+                                self.show_popup = Some(String::from(
+                                    "Misaligned events. Quitting DAQ.\n<q> to exit.",
+                                ));
                             }
                             DaqError::DroppedEvents => {
-                                self.show_popup =
-                                    Some(String::from("Events dropped. Quitting DAQ."));
+                                self.show_popup = Some(String::from(
+                                    "Events dropped. Quitting DAQ.\n<q> to exit.",
+                                ));
                             }
                             _ => {}
                         }
@@ -517,9 +547,11 @@ fn event_processing(
             let curr_trig0 = event0.event.c_event.trigger_id;
             let curr_trig1 = event1.event.c_event.trigger_id;
             if curr_trig0 != curr_trig1 {
+                shutdown.store(true, Ordering::SeqCst);
                 return Err(DaqError::MisalignedEvents);
             }
             if curr_trig0 != curr_trig_id {
+                shutdown.store(true, Ordering::SeqCst);
                 return Err(DaqError::DroppedEvents);
             }
             curr_trig_id += 1;
@@ -529,7 +561,8 @@ fn event_processing(
                 event_channel_buf: rx.len(),
             };
             if tx_stats.send(run_info).is_err() {
-                break;
+                shutdown.store(true, Ordering::SeqCst);
+                return Err(DaqError::EventProcessingTransit);
             }
             writer
                 .append_event(
@@ -612,7 +645,8 @@ fn data_taking_thread(
                     event: std::mem::replace(&mut event, EventWrapper::new(num_ch, waveform_len)),
                 };
                 if tx.send(board_event).is_err() {
-                    break;
+                    shutdown.store(true, Ordering::SeqCst);
+                    return Err(DaqError::DataTakingTransit);
                 }
             }
             FELibReturn::Timeout => continue,

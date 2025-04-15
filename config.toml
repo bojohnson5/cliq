@@ -1,8 +1,8 @@
 [run_settings]
-# list of board URLs to connect to
+# list of board URLs
 boards = ["dig2://caendgtz-usb-25380", "dig2://caendgtz-usb-25379"]
 # run duration in seconds
-run_duration = 60
+run_duration = 20
 output_dir = "/home/lardaq/Documents/testing"
 campaign_num = 0
 
@@ -17,6 +17,7 @@ record_len = 4125
 
 # pre_trig_len is pre-trigger length in samples
 pre_trig_len = 100
+
 # trig_source = "TrgIn" # TrgIn is another option
 trig_source = "SwTrg | TestPulse" # TrgIn is another option
 io_level = "TTL"
