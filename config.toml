@@ -21,6 +21,10 @@ pre_trig_len = 100
 # trig_source = "TrgIn" # TrgIn is another option
 trig_source = "SwTrg | TestPulse" # TrgIn is another option
 io_level = "TTL"
+test_pulse_period = 8333333
+test_pulse_width = 1000
+test_pulse_low = 0
+test_pulse_high = 10000
 
 # dc_offset can be a single number for each channel
 # or a map for each channel
@@ -29,6 +33,48 @@ io_level = "TTL"
 # "2" = 30.0
 # "50" = 50.0
 dc_offset = 50.0
+
+# trigger threshold can be a single number for each
+# channel or a map for each channel in the range
+# -65536..65536 in ADC units
+# [board_settings.trig_thr]
+# "1" = -20
+# "2" = -40
+trig_thr = -20
+
+# trigger threshold mode can be chosen for all
+# channels or each individual channel
+# [board_settings.trig_thr_mode]
+# "1" = "Relative"
+# "2" = "Absolute"
+trig_thr_mode = "Relative" # or "Absolute"
+
+# trigger edge can be chosen for all
+# channels or each individual channel
+# [board_settings.trig_edge]
+# "1" = "Rise"
+# "2" = "Fall"
+trig_edge = "Fall" # or "Rise"
+
+# samples over threshold can be chosen for all
+# channels or per-channel basis
+# 0..65535
+# [board_settings.samples_over_thr]
+# "1" = 4
+# "2" = 10
+samples_over_thr = 5
+
+itl_logic = "OR"        # or "AND" or "Majority"
+itl_majority_level = 4
+itl_pair_logic = "NONE" # or "OR" or "AND"
+itl_polarity = "Direct" # or "Inverted"
+itl_retrig = "True"     # or "False"
+
+# which channels to include in ITL logic
+# [board_settings.itl_connect]
+# "1" = "ITLA"
+# "2" = "Disabled"
+itl_connect = "ITLA" # or "Disabled"
 
 [sync_settings]
 primary_clock_src = "Internal"

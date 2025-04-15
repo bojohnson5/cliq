@@ -1,4 +1,7 @@
-use crate::{ChannelConfig, Conf, DCOffsetConfig, EventWrapper, FELibReturn};
+use crate::{
+    ChannelConfig, Conf, DCOffsetConfig, EventWrapper, FELibReturn, ITLConnect, SamplesOverThr,
+    TriggerEdge, TriggerThr, TriggerThrMode,
+};
 use std::{
     collections::VecDeque,
     time::{Duration, Instant},
@@ -149,10 +152,115 @@ pub fn configure_board(handle: u64, config: &Conf) -> Result<(), FELibReturn> {
         &config.board_settings.trig_source,
     )?;
     crate::felib_setvalue(handle, "/par/IOlevel", &config.board_settings.io_level)?;
-    crate::felib_setvalue(handle, "/par/TestPulsePeriod", "8333333")?;
-    crate::felib_setvalue(handle, "/par/TestPulseWidth", "1000")?;
-    crate::felib_setvalue(handle, "/par/TestPulseLowLevel", "0")?;
-    crate::felib_setvalue(handle, "/par/TestPulseHighLevel", "10000")?;
+    crate::felib_setvalue(
+        handle,
+        "/par/TestPulsePeriod",
+        &config.board_settings.test_pulse_period.to_string(),
+    )?;
+    crate::felib_setvalue(
+        handle,
+        "/par/TestPulseWidth",
+        &config.board_settings.test_pulse_width.to_string(),
+    )?;
+    crate::felib_setvalue(
+        handle,
+        "/par/TestPulseLowLevel",
+        &config.board_settings.test_pulse_low.to_string(),
+    )?;
+    crate::felib_setvalue(
+        handle,
+        "/par/TestPulseHighLevel",
+        &config.board_settings.test_pulse_high.to_string(),
+    )?;
+    match config.board_settings.trig_thr {
+        TriggerThr::Global(thr) => {
+            crate::felib_setvalue(handle, "/ch/0..63/par/TriggerThr", &thr.to_string())?;
+        }
+        TriggerThr::PerChannel(ref map) => {
+            for (chan, thr) in map {
+                let path = format!("/ch/{}/par/TriggerThr", chan);
+
+                crate::felib_setvalue(handle, &path, &thr.to_string())?;
+            }
+        }
+    }
+    match config.board_settings.trig_thr_mode {
+        TriggerThrMode::Global(ref mode) => {
+            crate::felib_setvalue(handle, "/ch/0..63/par/TriggerThrMode", mode)?;
+        }
+        TriggerThrMode::PerChannel(ref map) => {
+            for (chan, mode) in map {
+                let path = format!("/ch/{}/par/TriggerThrMode", chan);
+
+                crate::felib_setvalue(handle, &path, mode)?;
+            }
+        }
+    }
+    match config.board_settings.trig_edge {
+        TriggerEdge::Global(ref edge) => {
+            crate::felib_setvalue(handle, "/ch/0..63/par/SelfTriggerEdge", edge)?;
+        }
+        TriggerEdge::PerChannel(ref map) => {
+            for (chan, edge) in map {
+                let path = format!("/ch/{}/par/SelfTriggerEdge", chan);
+
+                crate::felib_setvalue(handle, &path, edge)?;
+            }
+        }
+    }
+    match config.board_settings.samples_over_thr {
+        SamplesOverThr::Global(samples) => {
+            crate::felib_setvalue(
+                handle,
+                "/ch/0..63/par/SelfTriggerEdge",
+                &samples.to_string(),
+            )?;
+        }
+        SamplesOverThr::PerChannel(ref map) => {
+            for (chan, samples) in map {
+                let path = format!("/ch/{}/par/SelfTriggerEdge", chan);
+
+                crate::felib_setvalue(handle, &path, &samples.to_string())?;
+            }
+        }
+    }
+    crate::felib_setvalue(
+        handle,
+        "/par/ITLAMainLogic",
+        &config.board_settings.itl_logic,
+    )?;
+    crate::felib_setvalue(
+        handle,
+        "/par/ITLAMajorityLev",
+        &config.board_settings.itl_majority_level.to_string(),
+    )?;
+    crate::felib_setvalue(
+        handle,
+        "/par/ITLAPairLogic",
+        &config.board_settings.itl_pair_logic,
+    )?;
+    crate::felib_setvalue(
+        handle,
+        "/par/ITLAPolarity",
+        &config.board_settings.itl_polarity,
+    )?;
+    crate::felib_setvalue(
+        handle,
+        "/par/ITLAEnRetrigger",
+        &config.board_settings.itl_retrig,
+    )?;
+    match config.board_settings.itl_connect {
+        ITLConnect::Global(ref connect) => {
+            crate::felib_setvalue(handle, "/ch/0..63/par/ITLConnect", connect)?;
+        }
+        ITLConnect::PerChannel(ref map) => {
+            for (chan, connect) in map {
+                let path = format!("/ch/{}/par/ITLConnect", chan);
+
+                crate::felib_setvalue(handle, &path, connect)?;
+            }
+        }
+    }
 
     Ok(())
 }

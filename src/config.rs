@@ -28,6 +28,20 @@ pub struct BoardSettings {
     pub trig_source: String,
     pub dc_offset: DCOffsetConfig,
     pub io_level: String,
+    pub test_pulse_period: usize,
+    pub test_pulse_width: usize,
+    pub test_pulse_low: usize,
+    pub test_pulse_high: usize,
+    pub trig_thr: TriggerThr,
+    pub trig_thr_mode: TriggerThrMode,
+    pub trig_edge: TriggerEdge,
+    pub samples_over_thr: SamplesOverThr,
+    pub itl_logic: String,
+    pub itl_majority_level: u8,
+    pub itl_pair_logic: String,
+    pub itl_polarity: String,
+    pub itl_connect: ITLConnect,
+    pub itl_retrig: String,
 }
 
 #[derive(Config, Debug, Clone)]
@@ -56,4 +70,39 @@ pub enum ChannelConfig {
 pub enum DCOffsetConfig {
     Global(f64),
     PerChannel(HashMap<String, f64>),
+}
+
+#[derive(Deserialize, Clone, Debug)]
+#[serde(untagged)]
+pub enum TriggerThr {
+    Global(isize),
+    PerChannel(HashMap<String, isize>),
+}
+
+#[derive(Deserialize, Clone, Debug)]
+#[serde(untagged)]
+pub enum TriggerThrMode {
+    Global(String),
+    PerChannel(HashMap<String, String>),
+}
+
+#[derive(Deserialize, Clone, Debug)]
+#[serde(untagged)]
+pub enum TriggerEdge {
+    Global(String),
+    PerChannel(HashMap<String, String>),
+}
+
+#[derive(Deserialize, Clone, Debug)]
+#[serde(untagged)]
+pub enum SamplesOverThr {
+    Global(usize),
+    PerChannel(HashMap<String, usize>),
+}
+
+#[derive(Deserialize, Clone, Debug)]
+#[serde(untagged)]
+pub enum ITLConnect {
+    Global(String),
+    PerChannel(HashMap<String, String>),
 }
