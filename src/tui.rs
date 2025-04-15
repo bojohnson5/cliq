@@ -27,6 +27,8 @@ use std::{
 enum DaqError {
     MisalignedEvents,
     DroppedEvents,
+    DataTakingTransit,
+    EventProcessingTransit,
     FELib(FELibReturn),
 }
 
@@ -130,6 +132,16 @@ impl Status {
                                         Some(String::from("Events dropped. Quitting DAQ."))
                                 }
                                 DaqError::FELib(val) => self.show_popup = Some(val.to_string()),
+                                DaqError::DataTakingTransit => {
+                                    self.show_popup = Some(String::from(
+                                        "Data taking pipeline error. Quitting DAQ.",
+                                    ))
+                                }
+                                DaqError::EventProcessingTransit => {
+                                    self.show_popup = Some(String::from(
+                                        "Event processing stats pipeline error. Quitting DAQ.",
+                                    ))
+                                }
                             }
                             terminal.draw(|f| self.draw(f))?;
                             self.handle_error_event()?;
@@ -517,9 +529,11 @@ fn event_processing(
             let curr_trig0 = event0.event.c_event.trigger_id;
             let curr_trig1 = event1.event.c_event.trigger_id;
             if curr_trig0 != curr_trig1 {
+                shutdown.store(true, Ordering::SeqCst);
                 return Err(DaqError::MisalignedEvents);
             }
             if curr_trig0 != curr_trig_id {
+                shutdown.store(true, Ordering::SeqCst);
                 return Err(DaqError::DroppedEvents);
             }
             curr_trig_id += 1;
@@ -529,7 +543,8 @@ fn event_processing(
                 event_channel_buf: rx.len(),
             };
             if tx_stats.send(run_info).is_err() {
-                break;
+                shutdown.store(true, Ordering::SeqCst);
+                return Err(DaqError::EventProcessingTransit);
             }
             writer
                 .append_event(
@@ -612,7 +627,8 @@ fn data_taking_thread(
                     event: std::mem::replace(&mut event, EventWrapper::new(num_ch, waveform_len)),
                 };
                 if tx.send(board_event).is_err() {
-                    break;
+                    shutdown.store(true, Ordering::SeqCst);
+                    return Err(DaqError::DataTakingTransit);
                 }
             }
             FELibReturn::Timeout => continue,
