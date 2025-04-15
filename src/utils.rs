@@ -212,13 +212,13 @@ pub fn configure_board(handle: u64, config: &Conf) -> Result<(), FELibReturn> {
         SamplesOverThr::Global(samples) => {
             crate::felib_setvalue(
                 handle,
-                "/ch/0..63/par/SelfTriggerEdge",
+                "/ch/0..63/par/SamplesOverThreshold",
                 &samples.to_string(),
             )?;
         }
         SamplesOverThr::PerChannel(ref map) => {
             for (chan, samples) in map {
-                let path = format!("/ch/{}/par/SelfTriggerEdge", chan);
+                let path = format!("/ch/{}/par/SamplesOverThreshold", chan);
 
                 crate::felib_setvalue(handle, &path, &samples.to_string())?;
             }
