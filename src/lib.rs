@@ -25,6 +25,8 @@ pub const EVENT_FORMAT: &str = " \
         { \"name\" : \"TRIGGER_ID\", \"type\" : \"U32\" }, \
         { \"name\" : \"WAVEFORM\", \"type\" : \"U16\", \"dim\" : 2 }, \
         { \"name\" : \"WAVEFORM_SIZE\", \"type\" : \"SIZE_T\", \"dim\" : 1 }, \
+        { \"name\" : \"FLAGS\", \"type\" : \"U16\" }, \
+        { \"name\" : \"BOARD_FAIL\", \"type\" : \"BOOL\" }, \
         { \"name\" : \"EVENT_SIZE\", \"type\" : \"SIZE_T\" } \
     ] \
 ";

@@ -7,6 +7,8 @@ pub struct CEvent {
     pub timestamp_us: f64,
     pub trigger_id: u32,
     pub event_size: usize,
+    pub flags: u16,
+    pub board_fail: bool,
     // waveform is an array of pointers (one per channel)
     pub waveform: *mut *mut u16,
     // Arrays (one element per channel) filled in by the C function
@@ -72,6 +74,8 @@ impl EventWrapper {
             timestamp_us: 0.0,
             trigger_id: 0,
             event_size: 0,
+            flags: 0,
+            board_fail: false,
             waveform: waveform_ptr,
             n_samples: n_samples_ptr,
             n_allocated_samples: n_allocated_samples_ptr,

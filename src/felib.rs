@@ -226,6 +226,8 @@ pub fn felib_readdata(handle: u64, data: &mut EventWrapper) -> FELibReturn {
             &mut data.c_event.trigger_id,
             data.c_event.waveform,
             data.c_event.n_samples,
+            &mut data.c_event.flags,
+            &mut data.c_event.board_fail,
             &mut data.c_event.event_size,
         )
     };

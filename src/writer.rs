@@ -166,10 +166,16 @@ pub struct BoardData {
     pub max_events: usize,
     pub timestamps: Dataset,
     pub waveforms: Dataset,
+    pub trigids: Dataset,
+    pub flags: Dataset,
+    pub fails: Dataset,
     pub buffer_capacity: usize,
     pub buffer_count: usize,
     pub ts_buffer: Array2<u64>,
     pub wf_buffer: Array3<u16>,
+    pub trigid_buffer: Array2<u32>,
+    pub flag_buffer: Array2<u16>,
+    pub fail_buffer: Array2<bool>,
     pub n_channels: usize,
     pub n_samples: usize,
 }
@@ -183,7 +189,7 @@ impl BoardData {
         buffer_capacity: usize,
         compression_level: u8,
     ) -> Result<Self> {
-        // Create datasets for timestamps and waveforms.
+        // Create datasets
         // For timestamps we use shape (max_events, 1) to allow writing a 1D slice later.
         let ts_shape = (max_events, 1);
         let timestamps = group
@@ -202,19 +208,52 @@ impl BoardData {
             .chunk((buffer_capacity, n_channels, n_samples))
             .create("waveforms")?;
 
+        let trigid_shape = (max_events, 1);
+        let trigids = group
+            .new_dataset::<u32>()
+            .shape(trigid_shape)
+            .blosc_zstd(compression_level, true)
+            .chunk((buffer_capacity, 1))
+            .create("triggerids")?;
+
+        let flags_shape = (max_events, 1);
+        let flags = group
+            .new_dataset::<u16>()
+            .shape(flags_shape)
+            .blosc_zstd(compression_level, true)
+            .chunk((buffer_capacity, 1))
+            .create("flags")?;
+
+        let fail_shape = (max_events, 1);
+        let fails = group
+            .new_dataset::<bool>()
+            .shape(fail_shape)
+            .blosc_zstd(compression_level, true)
+            .chunk((buffer_capacity, 1))
+            .create("boardfail")?;
+
         // Create the in-memory buffers.
         let ts_buffer = Array2::<u64>::zeros((buffer_capacity, 1));
         let wf_buffer = Array3::<u16>::zeros((buffer_capacity, n_channels, n_samples));
+        let trigid_buffer = Array2::<u32>::zeros((buffer_capacity, 1));
+        let flag_buffer = Array2::<u16>::zeros((buffer_capacity, 1));
+        let fail_buffer = Array2::<bool>::default((buffer_capacity, 1));
 
         Ok(Self {
             current_event: 0,
             max_events,
             timestamps,
             waveforms,
+            trigids,
+            flags,
+            fails,
             buffer_capacity,
             buffer_count: 0,
             ts_buffer,
             wf_buffer,
+            trigid_buffer,
+            flag_buffer,
+            fail_buffer,
             n_channels,
             n_samples,
         })
