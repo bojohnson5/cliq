@@ -61,6 +61,8 @@ pub struct SyncSettings {
     pub secondary_clock_out_fp: String,
     pub auto_disarm: String,
     pub trig_out: String,
+    pub run_delay: usize,
+    pub clk_out_delay: isize,
 }
 
 #[derive(Deserialize, Clone, Debug)]

@@ -273,7 +273,7 @@ pub fn configure_board(handle: u64, config: &Conf) -> Result<(), FELibReturn> {
 pub fn configure_sync(
     handle: u64,
     board_id: isize,
-    num_boards: isize,
+    // num_boards: isize,
     config: &Conf,
 ) -> Result<(), FELibReturn> {
     let first_board = board_id == 0;
@@ -321,41 +321,73 @@ pub fn configure_sync(
     )?;
     crate::felib_setvalue(handle, "/par/TrgOutMode", &config.sync_settings.trig_out)?;
 
-    let run_delay = get_run_delay(board_id, num_boards);
-    let clock_out_delay = get_clock_out_delay(board_id, num_boards);
-    crate::felib_setvalue(handle, "/par/RunDelay", &run_delay.to_string())?;
+    // let run_delay = get_run_delay(board_id, num_boards);
+    // let clock_out_delay = get_clock_out_delay(board_id, num_boards);
+    crate::felib_setvalue(
+        handle,
+        "/par/RunDelay",
+        &config.sync_settings.run_delay.to_string(),
+    )?;
     crate::felib_setvalue(
         handle,
         "/par/VolatileClockOutDelay",
-        &clock_out_delay.to_string(),
+        &config.sync_settings.clk_out_delay.to_string(),
     )?;
 
     Ok(())
 }
 
-fn get_clock_out_delay(board_id: isize, num_boards: isize) -> isize {
-    let first_board = board_id == 0;
-    let last_board = board_id == num_boards - 1;
+// fn get_clock_out_delay(board_id: isize, num_boards: isize) -> isize {
+//     let first_board = board_id == 0;
+//     let last_board = board_id == num_boards - 1;
 
-    if last_board {
-        0
-    } else if first_board {
-        // -2148
-        -2188
-    } else {
-        -3111
+//     if last_board {
+//         0
+//     } else if first_board {
+//         // -2148
+//         -2188
+//     } else {
+//         -3111
+//     }
+// }
+
+// fn get_run_delay(board_id: isize, num_boards: isize) -> isize {
+//     let first_board = board_id == 0;
+//     let board_id_from_last = num_boards - board_id - 1;
+
+//     let mut run_delay_clk = 2 * board_id_from_last;
+
+//     if first_board {
+//         run_delay_clk += 4;
+//     }
+
+//     run_delay_clk * 8
+// }
+
+/// Drops from whichever queue has the smaller trigger_id,
+/// incrementing `misaligned_count` for each drop, until
+/// both fronts agree (or one runs dry).
+pub fn align_queues(
+    queue0: &mut VecDeque<BoardEvent>,
+    queue1: &mut VecDeque<BoardEvent>,
+    misaligned_count: &mut usize,
+) {
+    loop {
+        match (queue0.front(), queue1.front()) {
+            (Some(e0), Some(e1)) if e0.event.c_event.trigger_id == e1.event.c_event.trigger_id => {
+                // aligned!
+                break;
+            }
+            (Some(e0), Some(e1)) => {
+                *misaligned_count += 1;
+                if e0.event.c_event.trigger_id < e1.event.c_event.trigger_id {
+                    queue0.pop_front();
+                } else {
+                    queue1.pop_front();
+                }
+            }
+            // if either queue is empty, nothing more to do
+            _ => break,
+        }
     }
-}
-
-fn get_run_delay(board_id: isize, num_boards: isize) -> isize {
-    let first_board = board_id == 0;
-    let board_id_from_last = num_boards - board_id - 1;
-
-    let mut run_delay_clk = 2 * board_id_from_last;
-
-    if first_board {
-        run_delay_clk += 4;
-    }
-
-    run_delay_clk * 8
 }

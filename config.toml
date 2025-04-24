@@ -22,7 +22,7 @@ record_len = 4125
 # pre_trig_len is pre-trigger length in samples
 pre_trig_len = 100
 
-# trig_source = "TrgIn" # TrgIn is another option
+# trig_source = "TrgIn"
 trig_source = "SwTrg | TestPulse" # TrgIn is another option
 io_level = "TTL"
 test_pulse_period = 8333333
@@ -92,3 +92,5 @@ secondary_start_source = "EncodedClkIn"
 secondary_clock_out_fp = "False"
 auto_disarm = "True"
 trig_out = "TrgIn"
+run_delay = 0
+clk_out_delay = 0

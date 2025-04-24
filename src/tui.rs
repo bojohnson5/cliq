@@ -40,9 +40,11 @@ impl From<FELibReturn> for DaqError {
 
 #[derive(Default, Clone, Copy)]
 struct RunInfo {
-    board0_event_size: usize,
-    board1_event_size: usize,
-    event_channel_buf: usize,
+    pub board0_event_size: usize,
+    pub board1_event_size: usize,
+    pub event_channel_buf: usize,
+    pub misaligned_events: usize,
+    pub dropped_events: usize,
 }
 
 impl RunInfo {
@@ -60,6 +62,8 @@ pub struct Status {
     pub camp_num: usize,
     pub curr_run: usize,
     pub buffer_len: usize,
+    pub misaligned_events: usize,
+    pub dropped_events: usize,
     pub config: Conf,
     pub boards: Vec<(usize, u64)>,
     pub max_runs: Option<usize>,
@@ -95,7 +99,7 @@ impl Status {
                 crate::configure_sync(
                     dev_handle,
                     i as isize,
-                    self.boards.len() as isize,
+                    // self.boards.len() as isize,
                     &self.config,
                 )?;
             }
@@ -112,6 +116,8 @@ impl Status {
                 while let Ok(run_info) = rx_stats.try_recv() {
                     self.counter.increment(run_info.event_size());
                     self.buffer_len = run_info.event_channel_buf;
+                    self.misaligned_events = run_info.misaligned_events;
+                    self.dropped_events = run_info.dropped_events;
                 }
 
                 self.handle_events()?;
@@ -227,6 +233,8 @@ impl Status {
             boards,
             max_runs,
             run_duration,
+            misaligned_events: 0,
+            dropped_events: 0,
         }
     }
 
@@ -307,23 +315,31 @@ impl Status {
             .title_bottom(instructrions.centered())
             .border_set(border::THICK);
 
-        let status_text = Text::from(vec![Line::from(vec![
-            "Elapsed time: ".into(),
-            self.counter
-                .t_begin
-                .elapsed()
-                .as_secs()
-                .to_string()
-                .yellow(),
-            " s".into(),
-            " Events: ".into(),
-            self.counter.n_events.to_string().yellow(),
-            " Data rate: ".into(),
-            format!("{:.2}", self.counter.rate()).yellow(),
-            " MB/s ".into(),
-            " Buffer length: ".into(),
-            self.buffer_len.to_string().yellow(),
-        ])]);
+        let status_text = Text::from(vec![
+            Line::from(vec![
+                "Elapsed time: ".into(),
+                self.counter
+                    .t_begin
+                    .elapsed()
+                    .as_secs()
+                    .to_string()
+                    .yellow(),
+                " s".into(),
+                " Events: ".into(),
+                self.counter.n_events.to_string().yellow(),
+                " Data rate: ".into(),
+                format!("{:.2}", self.counter.rate()).yellow(),
+                " MB/s ".into(),
+                " Buffer length: ".into(),
+                self.buffer_len.to_string().yellow(),
+            ]),
+            Line::from(vec![
+                "Misaligned events: ".into(),
+                self.misaligned_events.to_string().yellow(),
+                " Dropped events: ".into(),
+                self.dropped_events.to_string().yellow(),
+            ]),
+        ]);
 
         Paragraph::new(status_text).centered().block(block)
     }
@@ -510,6 +526,11 @@ fn event_processing(
     config: Conf,
     shutdown: Arc<AtomicBool>,
 ) -> Result<(), DaqError> {
+    // new counters
+    let mut misaligned_count = 0;
+    let mut dropped_count = 0;
+    let mut curr_trig_id = 0;
+
     let mut writer = HDF5Writer::new(
         run_file,
         64,
@@ -521,20 +542,18 @@ fn event_processing(
         config.run_settings.compression_level,
     )
     .unwrap();
+
     let mut queue0 = VecDeque::new();
     let mut queue1 = VecDeque::new();
-    let mut curr_trig_id = 0;
+
     loop {
+        // 1) pull in any new events
         match rx.recv() {
             Ok(mut board_event) => {
                 zero_suppress(&mut board_event);
                 match board_event.board_id {
-                    0 => {
-                        queue0.push_back(board_event);
-                    }
-                    1 => {
-                        queue1.push_back(board_event);
-                    }
+                    0 => queue0.push_back(board_event),
+                    1 => queue1.push_back(board_event),
                     _ => unreachable!(),
                 }
             }
@@ -543,44 +562,60 @@ fn event_processing(
                 break;
             }
         }
+
+        // 2) if both queues have something, first align them
         if queue0.front().is_some() && queue1.front().is_some() {
-            let event0 = queue0.pop_front().unwrap();
-            let event1 = queue1.pop_front().unwrap();
-            let curr_trig0 = event0.event.c_event.trigger_id;
-            let curr_trig1 = event1.event.c_event.trigger_id;
-            if curr_trig0 != curr_trig1 {
-                shutdown.store(true, Ordering::SeqCst);
-                return Err(DaqError::MisalignedEvents);
+            crate::align_queues(&mut queue0, &mut queue1, &mut misaligned_count);
+
+            // only proceed if, after alignment, we still have a pair
+            if let (Some(e0), Some(e1)) = (queue0.front(), queue1.front()) {
+                let tid0 = e0.event.c_event.trigger_id;
+                let _tid1 = e1.event.c_event.trigger_id;
+
+                // 3) detect dropped‐in‐sequence
+                if tid0 != curr_trig_id {
+                    // how many were skipped?
+                    dropped_count += (tid0 as isize - curr_trig_id as isize).abs() as usize;
+                }
+
+                // advance our “expected” counter
+                curr_trig_id = tid0 + 1;
+
+                // actually pop and process
+                let event0 = queue0.pop_front().unwrap();
+                let event1 = queue1.pop_front().unwrap();
+
+                let run_info = RunInfo {
+                    board0_event_size: event0.event.c_event.event_size,
+                    board1_event_size: event1.event.c_event.event_size,
+                    event_channel_buf: rx.len(),
+                    // optionally expose your new counters in RunInfo…
+                    misaligned_events: misaligned_count,
+                    dropped_events: dropped_count,
+                };
+
+                if tx_stats.send(run_info).is_err() {
+                    shutdown.store(true, Ordering::SeqCst);
+                    return Err(DaqError::EventProcessingTransit);
+                }
+
+                writer
+                    .append_event(
+                        event0.board_id,
+                        event0.event.c_event.timestamp,
+                        &event0.event.waveform_data,
+                    )
+                    .unwrap();
+                writer
+                    .append_event(
+                        event1.board_id,
+                        event1.event.c_event.timestamp,
+                        &event1.event.waveform_data,
+                    )
+                    .unwrap();
             }
-            if curr_trig0 != curr_trig_id {
-                shutdown.store(true, Ordering::SeqCst);
-                return Err(DaqError::DroppedEvents);
-            }
-            curr_trig_id += 1;
-            let run_info = RunInfo {
-                board0_event_size: event0.event.c_event.event_size,
-                board1_event_size: event1.event.c_event.event_size,
-                event_channel_buf: rx.len(),
-            };
-            if tx_stats.send(run_info).is_err() {
-                shutdown.store(true, Ordering::SeqCst);
-                return Err(DaqError::EventProcessingTransit);
-            }
-            writer
-                .append_event(
-                    event0.board_id,
-                    event0.event.c_event.timestamp,
-                    &event0.event.waveform_data,
-                )
-                .unwrap();
-            writer
-                .append_event(
-                    event1.board_id,
-                    event1.event.c_event.timestamp,
-                    &event1.event.waveform_data,
-                )
-                .unwrap();
         }
+
         if shutdown.load(Ordering::SeqCst) {
             writer.flush_all().unwrap();
             break;
@@ -590,7 +625,6 @@ fn event_processing(
     drop(tx_stats);
     Ok(())
 }
-
 /// Data-taking thread function for one board.
 /// It configures the endpoint, signals that configuration is complete,
 /// waits for the shared acquisition start signal, then continuously reads events and sends them.
