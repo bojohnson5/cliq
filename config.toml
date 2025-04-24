@@ -6,6 +6,10 @@ run_duration = 20
 output_dir = "/home/lardaq/Documents/testing"
 campaign_num = 0
 
+# default values that don't need to be included
+# blosc_threads = 5
+# compression_level = 2
+
 [board_settings]
 # en_chans can be either true for all channels or a list
 # of channels to enable
@@ -65,9 +69,10 @@ trig_edge = "Fall" # or "Rise"
 samples_over_thr = 5
 
 itl_logic = "OR"        # or "AND" or "Majority"
-itl_majority_level = 4
+itl_majority_level = 4  # how many channels to include in majority
 itl_pair_logic = "NONE" # or "OR" or "AND"
 itl_polarity = "Direct" # or "Inverted"
+itl_gatewidth = 1000    # ns
 itl_retrig = "True"     # or "False"
 
 # which channels to include in ITL logic

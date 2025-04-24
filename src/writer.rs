@@ -13,6 +13,7 @@ pub struct HDF5Writer {
     buffer_capacity: usize,
     subrun: usize,
     file_template: String,
+    compression_level: u8,
 }
 
 impl HDF5Writer {
@@ -23,10 +24,12 @@ impl HDF5Writer {
         n_boards: usize,
         max_events_per_board: usize,
         buffer_capacity: usize,
+        n_threads: u8,
+        compression_level: u8,
     ) -> Result<Self> {
         let file_template = filename.to_str().unwrap().replace("_0", "_{}");
         let file = File::create(filename)?;
-        blosc_set_nthreads(10);
+        blosc_set_nthreads(n_threads);
 
         // Create BoardData for each board.
         let boards = Self::create_boards(
@@ -36,6 +39,7 @@ impl HDF5Writer {
             n_boards,
             max_events_per_board,
             buffer_capacity,
+            compression_level,
         )?;
 
         Ok(Self {
@@ -47,6 +51,7 @@ impl HDF5Writer {
             buffer_capacity,
             subrun: 0,
             file_template,
+            compression_level,
         })
     }
 
@@ -57,13 +62,23 @@ impl HDF5Writer {
         n_boards: usize,
         max_events: usize,
         buffer_capacity: usize,
+        compression_level: u8,
     ) -> Result<Vec<BoardData>> {
         let groups: Vec<Group> = (0..n_boards)
             .map(|board| file.create_group(&format!("board{}", board)))
             .collect::<Result<_, _>>()?;
         let boards: Vec<BoardData> = groups
             .iter()
-            .map(|group| BoardData::new(group, n_channels, n_samples, max_events, buffer_capacity))
+            .map(|group| {
+                BoardData::new(
+                    group,
+                    n_channels,
+                    n_samples,
+                    max_events,
+                    buffer_capacity,
+                    compression_level,
+                )
+            })
             .collect::<Result<_, _>>()?;
         Ok(boards)
     }
@@ -127,6 +142,7 @@ impl HDF5Writer {
             self.boards.len(),
             self.max_events_per_board,
             self.buffer_capacity,
+            self.compression_level,
         )?;
 
         // Replace the current file and boards.
@@ -165,6 +181,7 @@ impl BoardData {
         n_samples: usize,
         max_events: usize,
         buffer_capacity: usize,
+        compression_level: u8,
     ) -> Result<Self> {
         // Create datasets for timestamps and waveforms.
         // For timestamps we use shape (max_events, 1) to allow writing a 1D slice later.
@@ -172,7 +189,7 @@ impl BoardData {
         let timestamps = group
             .new_dataset::<u64>()
             .shape(ts_shape)
-            .blosc_zstd(2, true)
+            .blosc_zstd(compression_level, true)
             .chunk((buffer_capacity, 1))
             .create("timestamps")?;
 
@@ -181,7 +198,7 @@ impl BoardData {
             .new_dataset::<u16>()
             .shape(wf_shape)
             // Set chunking and compression if desired.
-            .blosc_zstd(2, true)
+            .blosc_zstd(compression_level, true)
             .chunk((buffer_capacity, n_channels, n_samples))
             .create("waveforms")?;
 

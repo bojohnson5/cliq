@@ -18,6 +18,10 @@ pub struct RunSettings {
     pub run_duration: u64,
     pub output_dir: String,
     pub campaign_num: usize,
+    #[config(default = 5)]
+    pub blosc_threads: u8,
+    #[config(default = 2)]
+    pub compression_level: u8,
 }
 
 #[derive(Config, Debug, Clone)]
@@ -40,6 +44,7 @@ pub struct BoardSettings {
     pub itl_majority_level: u8,
     pub itl_pair_logic: String,
     pub itl_polarity: String,
+    pub itl_gatewidth: usize,
     pub itl_connect: ITLConnect,
     pub itl_retrig: String,
 }

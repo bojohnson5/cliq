@@ -218,11 +218,11 @@ impl Status {
             counter: Counter::default(),
             t_begin: Instant::now(),
             run_num: 0,
-            camp_num,
             curr_run: 0,
             show_popup: None,
             exit: None,
             buffer_len: 0,
+            camp_num,
             config,
             boards,
             max_runs,
@@ -517,6 +517,8 @@ fn event_processing(
         config.run_settings.boards.len(),
         7500,
         50,
+        config.run_settings.blosc_threads,
+        config.run_settings.compression_level,
     )
     .unwrap();
     let mut queue0 = VecDeque::new();

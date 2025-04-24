@@ -246,6 +246,11 @@ pub fn configure_board(handle: u64, config: &Conf) -> Result<(), FELibReturn> {
     )?;
     crate::felib_setvalue(
         handle,
+        "/par/ITLAGateWidth",
+        &config.board_settings.itl_gatewidth.to_string(),
+    )?;
+    crate::felib_setvalue(
+        handle,
         "/par/ITLAEnRetrigger",
         &config.board_settings.itl_retrig,
     )?;
