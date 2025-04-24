@@ -54,7 +54,7 @@ impl RunInfo {
 }
 
 #[derive(Debug)]
-pub struct Status {
+pub struct Tui {
     pub counter: Counter,
     pub t_begin: Instant,
     pub run_duration: Duration,
@@ -77,16 +77,14 @@ pub enum StatusExit {
     Timeout,
 }
 
-impl Status {
+impl Tui {
     pub fn run(&mut self, terminal: &mut DefaultTerminal) -> Result<()> {
         let ticker = tick(Duration::from_secs(1));
         let max_runs = self.max_runs.unwrap_or(0);
 
         loop {
-            self.t_begin = Instant::now();
-            self.exit = None;
-            self.counter.reset();
-            self.buffer_len = 0;
+            // draw terminal here before resetting everything
+            terminal.draw(|f| self.draw(f))?;
 
             // Reset the boards and reconfigure everything for next run
             for &(_, dev_handle) in &self.boards {
@@ -109,6 +107,10 @@ impl Status {
             let (tx_events, ev_handle, board_handles) =
                 self.begin_run(Arc::clone(&shutdown), tx_stats)?;
 
+            self.t_begin = Instant::now();
+            self.exit = None;
+            self.counter.reset();
+            self.buffer_len = 0;
             while self.exit.is_none() && !shutdown.load(Ordering::SeqCst) {
                 let _ = ticker.recv();
 

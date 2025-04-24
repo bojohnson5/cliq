@@ -28,7 +28,7 @@ fn main() -> Result<()> {
     }
 
     let mut terminal = ratatui::init();
-    let status = Status::new(config, boards, args.runs).run(&mut terminal);
+    let status = Tui::new(config, boards, args.runs).run(&mut terminal);
     ratatui::restore();
 
     println!("\nTTFN!");

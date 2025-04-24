@@ -321,8 +321,6 @@ pub fn configure_sync(
     )?;
     crate::felib_setvalue(handle, "/par/TrgOutMode", &config.sync_settings.trig_out)?;
 
-    // let run_delay = get_run_delay(board_id, num_boards);
-    // let clock_out_delay = get_clock_out_delay(board_id, num_boards);
     crate::felib_setvalue(
         handle,
         "/par/RunDelay",
@@ -336,33 +334,6 @@ pub fn configure_sync(
 
     Ok(())
 }
-
-// fn get_clock_out_delay(board_id: isize, num_boards: isize) -> isize {
-//     let first_board = board_id == 0;
-//     let last_board = board_id == num_boards - 1;
-
-//     if last_board {
-//         0
-//     } else if first_board {
-//         // -2148
-//         -2188
-//     } else {
-//         -3111
-//     }
-// }
-
-// fn get_run_delay(board_id: isize, num_boards: isize) -> isize {
-//     let first_board = board_id == 0;
-//     let board_id_from_last = num_boards - board_id - 1;
-
-//     let mut run_delay_clk = 2 * board_id_from_last;
-
-//     if first_board {
-//         run_delay_clk += 4;
-//     }
-
-//     run_delay_clk * 8
-// }
 
 /// Drops from whichever queue has the smaller trigger_id,
 /// incrementing `misaligned_count` for each drop, until
