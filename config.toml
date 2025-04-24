@@ -3,13 +3,17 @@
 boards = ["dig2://caendgtz-usb-25380", "dig2://caendgtz-usb-25379"]
 # run duration in seconds
 run_duration = 20
+# where to write data on disk
 output_dir = "/home/lardaq/Documents/testing"
+# this will create a directory in the one above with
+# the correct campaign number
 campaign_num = 0
 
 # default values that don't need to be included
 # blosc_threads = 5
 # compression_level = 2
 
+# The ranges given are start..stop..step
 [board_settings]
 # en_chans can be either true for all channels or a list
 # of channels to enable
@@ -17,18 +21,24 @@ campaign_num = 0
 en_chans = true
 
 # record_len is the waveform length in samples
-record_len = 4125
+record_len = 4125 # 4..10485760..4
 
 # pre_trig_len is pre-trigger length in samples
-pre_trig_len = 100
+pre_trig_len = 100 # 0..2042..1
 
-# trig_source = "TrgIn"
+# options are "TrgIn", "P0" (backplane), "SwTrg", "LVDS", "ITLA", "ITLB",
+# "ITLA_AND_ITLB", "ITLA_OR_ITLB", "GPIO", "TestPulse", "UserTrg"
+# muliple options are allowed by separating with |
 trig_source = "SwTrg | TestPulse" # TrgIn is another option
+
+# options are "TTL" or "NIM"
 io_level = "TTL"
-test_pulse_period = 8333333
-test_pulse_width = 1000
-test_pulse_low = 0
-test_pulse_high = 10000
+
+# options for trig_source = "TestPulse"
+test_pulse_period = 8333333 # 0..34359738360..8
+test_pulse_width = 1000     # 0..34359738360..8
+test_pulse_low = 0          # 0..65535..1
+test_pulse_high = 10000     # 0..65535..1
 
 # dc_offset can be a single number for each channel
 # or a map for each channel
@@ -36,7 +46,7 @@ test_pulse_high = 10000
 # "1" = 20.0
 # "2" = 30.0
 # "50" = 50.0
-dc_offset = 50.0
+dc_offset = 50.0 # 0..100..0.001
 
 # trigger threshold can be a single number for each
 # channel or a map for each channel in the range
@@ -44,7 +54,7 @@ dc_offset = 50.0
 # [board_settings.trig_thr]
 # "1" = -20
 # "2" = -40
-trig_thr = -20
+trig_thr = -20 # -65536..65536..1
 
 # trigger threshold mode can be chosen for all
 # channels or each individual channel
@@ -66,13 +76,13 @@ trig_edge = "Fall" # or "Rise"
 # [board_settings.samples_over_thr]
 # "1" = 4
 # "2" = 10
-samples_over_thr = 5
+samples_over_thr = 5 # 0..65535..1
 
 itl_logic = "OR"        # or "AND" or "Majority"
-itl_majority_level = 4  # how many channels to include in majority
+itl_majority_level = 4  # 0..63..1 how many channels to include in majority
 itl_pair_logic = "NONE" # or "OR" or "AND"
 itl_polarity = "Direct" # or "Inverted"
-itl_gatewidth = 1000    # ns
+itl_gatewidth = 1000    # 0..524280..8 ns
 itl_retrig = "True"     # or "False"
 
 # which channels to include in ITL logic
@@ -82,15 +92,23 @@ itl_retrig = "True"     # or "False"
 itl_connect = "ITLA" # or "Disabled"
 
 [sync_settings]
-primary_clock_src = "Internal"
+primary_clock_src = "Internal" # or FPClkIn
+# options are "Disabled", "SyncIn", "TestPulse", "IntClk", "Run", "User"
 primary_sync_out = "Run"
+# options are "EncodedClkIn", "SINlevel", "SINedge", "SWcmd", "LVDS"
+# "FirstTrigger", "P0" (backplane)
 primary_start_source = "SWcmd"
-primary_clock_out_fp = "True"
+primary_clock_out_fp = "True"           # or False
 secondary_clock_src = "FPClkIn"
 secondary_sync_out = "Disabled"
 secondary_start_source = "EncodedClkIn"
 secondary_clock_out_fp = "False"
-auto_disarm = "True"
+auto_disarm = "True"                    # or False
+
+# options are "Disabled", "TrgIn", "P0", "SwTrg", "LVDS", "ITLA", "ITLB",
+# "ITLA_AND_ITLB", "ITLA_OR_ITLB", "EncodedClkIn", "Run", "RefClk",
+# "TestPulse", "Busy", "UserTrgout", "Fixed0", "Fixed1", "SyncIn", "SIN",
+# "GPIO", "LBinClk", "AcceptTrg", "TrgClk"
 trig_out = "TrgIn"
-run_delay = 0
-clk_out_delay = 0
+run_delay = 0      # 0..524280..8
+clk_out_delay = 0  # -18888.88888888889..18888.88888888889..74.07407407407408 ps
