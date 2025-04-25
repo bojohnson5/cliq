@@ -3,6 +3,7 @@ use crate::{
     TriggerEdge, TriggerThr, TriggerThrMode,
 };
 use std::{
+    arch::x86_64::_MM_ROUND_TOWARD_ZERO,
     collections::VecDeque,
     time::{Duration, Instant},
 };
@@ -273,7 +274,7 @@ pub fn configure_board(handle: u64, config: &Conf) -> Result<(), FELibReturn> {
 pub fn configure_sync(
     handle: u64,
     board_id: isize,
-    // num_boards: isize,
+    num_boards: isize,
     config: &Conf,
 ) -> Result<(), FELibReturn> {
     let first_board = board_id == 0;
@@ -321,18 +322,42 @@ pub fn configure_sync(
     )?;
     crate::felib_setvalue(handle, "/par/TrgOutMode", &config.sync_settings.trig_out)?;
 
-    crate::felib_setvalue(
-        handle,
-        "/par/RunDelay",
-        &config.sync_settings.run_delay.to_string(),
-    )?;
+    let run_delay = get_run_dealy(board_id, num_boards);
+    let clock_out_delay = get_clock_out_delay(board_id, num_boards);
+    crate::felib_setvalue(handle, "/par/RunDelay", &run_delay.to_string())?;
     crate::felib_setvalue(
         handle,
         "/par/VolatileClockOutDelay",
-        &config.sync_settings.clk_out_delay.to_string(),
+        &clock_out_delay.to_string(),
     )?;
 
     Ok(())
+}
+
+fn get_clock_out_delay(board_id: isize, num_boards: isize) -> isize {
+    let first_board = board_id == 0;
+    let last_board = board_id == num_boards - 1;
+
+    if last_board {
+        0
+    } else if first_board {
+        -2148
+    } else {
+        -3111
+    }
+}
+
+fn get_run_dealy(board_id: isize, num_boards: isize) -> isize {
+    let first_board = board_id == 0;
+    let board_id_from_last = num_boards - board_id - 1;
+
+    let mut run_delay_clk = 2 * board_id_from_last;
+
+    if first_board {
+        run_delay_clk += 4;
+    }
+
+    run_delay_clk * 8
 }
 
 /// Drops from whichever queue has the smaller trigger_id,

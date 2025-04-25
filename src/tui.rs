@@ -97,7 +97,7 @@ impl Tui {
                 crate::configure_sync(
                     dev_handle,
                     i as isize,
-                    // self.boards.len() as isize,
+                    self.boards.len() as isize,
                     &self.config,
                 )?;
             }
@@ -552,7 +552,7 @@ fn event_processing(
         // 1) pull in any new events
         match rx.recv() {
             Ok(mut board_event) => {
-                zero_suppress(&mut board_event);
+                // zero_suppress(&mut board_event);
                 match board_event.board_id {
                     0 => queue0.push_back(board_event),
                     1 => queue1.push_back(board_event),
