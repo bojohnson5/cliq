@@ -549,7 +549,6 @@ fn event_processing(
     let mut queue1 = VecDeque::new();
 
     loop {
-        // 1) pull in any new events
         match rx.recv() {
             Ok(mut board_event) => {
                 // zero_suppress(&mut board_event);
@@ -565,25 +564,19 @@ fn event_processing(
             }
         }
 
-        // 2) if both queues have something, first align them
         if queue0.front().is_some() && queue1.front().is_some() {
             crate::align_queues(&mut queue0, &mut queue1, &mut misaligned_count);
 
-            // only proceed if, after alignment, we still have a pair
             if let (Some(e0), Some(e1)) = (queue0.front(), queue1.front()) {
-                let tid0 = e0.event.c_event.trigger_id;
-                let _tid1 = e1.event.c_event.trigger_id;
+                let trgid0 = e0.event.c_event.trigger_id;
+                let _trgid1 = e1.event.c_event.trigger_id;
 
-                // 3) detect dropped‐in‐sequence
-                if tid0 != curr_trig_id {
-                    // how many were skipped?
-                    dropped_count += (tid0 as isize - curr_trig_id as isize).abs() as usize;
+                if trgid0 != curr_trig_id {
+                    dropped_count += (trgid0 as isize - curr_trig_id as isize).abs() as usize;
                 }
 
-                // advance our “expected” counter
-                curr_trig_id = tid0 + 1;
+                curr_trig_id = trgid0 + 1;
 
-                // actually pop and process
                 let event0 = queue0.pop_front().unwrap();
                 let event1 = queue1.pop_front().unwrap();
 
@@ -591,7 +584,6 @@ fn event_processing(
                     board0_event_size: event0.event.c_event.event_size,
                     board1_event_size: event1.event.c_event.event_size,
                     event_channel_buf: rx.len(),
-                    // optionally expose your new counters in RunInfo…
                     misaligned_events: misaligned_count,
                     dropped_events: dropped_count,
                 };
@@ -606,6 +598,9 @@ fn event_processing(
                         event0.board_id,
                         event0.event.c_event.timestamp,
                         &event0.event.waveform_data,
+                        event0.event.c_event.trigger_id,
+                        event0.event.c_event.flags,
+                        event0.event.c_event.board_fail,
                     )
                     .unwrap();
                 writer
@@ -613,6 +608,9 @@ fn event_processing(
                         event1.board_id,
                         event1.event.c_event.timestamp,
                         &event1.event.waveform_data,
+                        event1.event.c_event.trigger_id,
+                        event1.event.c_event.flags,
+                        event1.event.c_event.board_fail,
                     )
                     .unwrap();
             }
@@ -627,6 +625,7 @@ fn event_processing(
     drop(tx_stats);
     Ok(())
 }
+
 /// Data-taking thread function for one board.
 /// It configures the endpoint, signals that configuration is complete,
 /// waits for the shared acquisition start signal, then continuously reads events and sends them.

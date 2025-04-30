@@ -88,14 +88,18 @@ impl HDF5Writer {
         &mut self,
         board: usize,
         timestamp: u64,
-        event_data: &Array2<u16>,
+        waveforms: &Array2<u16>,
+        trigger_id: u32,
+        flag: u16,
+        fail: bool,
     ) -> Result<()> {
-        let result = self.boards[board].append_event(timestamp, event_data);
+        let result = self.boards[board].append_event(timestamp, waveforms, trigger_id, flag, fail);
 
         if let Err(e) = result {
             if e.to_string().contains("Maximum number of events reached") {
                 self.rollover()?;
-                return self.boards[board].append_event(timestamp, event_data);
+                return self.boards[board]
+                    .append_event(timestamp, waveforms, trigger_id, flag, fail);
             } else {
                 return Err(e);
             }
@@ -260,9 +264,16 @@ impl BoardData {
     }
 
     /// Append an event to the board’s buffers. When the buffer fills, flush it to disk.
-    pub fn append_event(&mut self, timestamp: u64, event_data: &Array2<u16>) -> Result<()> {
+    pub fn append_event(
+        &mut self,
+        timestamp: u64,
+        waveforms: &Array2<u16>,
+        trigger_id: u32,
+        flag: u16,
+        fail: bool,
+    ) -> Result<()> {
         // Verify that the incoming event has the expected shape.
-        let (channels, samples) = event_data.dim();
+        let (channels, samples) = waveforms.dim();
         if channels != self.n_channels || samples != self.n_samples {
             return Err(anyhow!("Event dimensions do not match dataset dimensions",));
         }
@@ -272,10 +283,13 @@ impl BoardData {
 
         // Place the new data into the buffers.
         self.ts_buffer[[self.buffer_count, 0]] = timestamp;
+        self.trigid_buffer[[self.buffer_count, 0]] = trigger_id;
+        self.flag_buffer[[self.buffer_count, 0]] = flag;
+        self.fail_buffer[[self.buffer_count, 0]] = fail;
         // Copy the 2D waveform event into the corresponding slice of the buffer.
         self.wf_buffer
             .slice_mut(s![self.buffer_count, .., ..])
-            .assign(event_data);
+            .assign(waveforms);
         self.buffer_count += 1;
 
         // Flush the buffers if they've reached capacity.
