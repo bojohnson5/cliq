@@ -2,6 +2,8 @@ use crate::{BoardEvent, Conf, Counter, EventWrapper, FELibReturn, HDF5Writer};
 use anyhow::{anyhow, Result};
 use crossbeam_channel::{tick, unbounded, Receiver, RecvError, Sender};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
+use ndarray::Axis;
+use ndarray::{parallel::prelude::*, s};
 use ratatui::{
     layout::{Constraint, Direction, Flex, Layout},
     style::{Color, Style, Stylize},
@@ -698,9 +700,36 @@ fn data_taking_thread(
     Ok(())
 }
 
-fn zero_suppress(board_data: &mut BoardEvent) {
+enum Edge {
+    Rise,
+    Fall,
+}
+
+/// suppress adc samples from digitizer based on user-defined threshold
+/// relative to baseline and whether or not the pulses are rising or
+/// falling and will not suppress and random channel specified by user
+fn zero_suppress(board_data: &mut BoardEvent, threshold: u16, edge: Edge, rand_chan: usize) {
     board_data
         .event
         .waveform_data
-        .par_map_inplace(|adc| *adc = 0);
+        .axis_iter_mut(Axis(0))
+        .into_par_iter()
+        .enumerate()
+        .map(|(i, mut channel)| {
+            if i != rand_chan {
+                let baseline = channel.slice(s![0..125]).mean().unwrap_or(0);
+                match edge {
+                    Edge::Rise => channel.map_inplace(|adc| {
+                        if *adc - baseline < threshold {
+                            *adc = 0
+                        }
+                    }),
+                    Edge::Fall => channel.map_inplace(|adc| {
+                        if *adc - baseline > threshold {
+                            *adc = 0
+                        }
+                    }),
+                }
+            }
+        });
 }
