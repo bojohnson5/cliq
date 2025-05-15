@@ -9,22 +9,29 @@ output_dir = "/home/lardaq/Documents/testing"
 # the correct campaign number
 campaign_num = 0
 
+# zero suppression level or what percentage of events
+# aren't zero suppressed at all
+zs_level = 0.01
+
 # default values that don't need to be included
 # blosc_threads = 5
 # compression_level = 2
 
+# Settings common to all boards
 # The ranges given are start..stop..step
-[board_settings]
-# en_chans can be either true for all channels or a list
-# of channels to enable
-# en_chans = [1]
-en_chans = true
-
+[board_settings.common]
 # record_len is the waveform length in samples
 record_len = 4125 # 4..10485760..4
 
 # pre_trig_len is pre-trigger length in samples
 pre_trig_len = 100 # 0..2042..1
+
+# The ranges given are start..stop..step
+[[board_settings.boards]]
+# en_chans can be either true for all channels or a list
+# of channels to enable
+# en_chans = [1]
+en_chans = true
 
 # options are "TrgIn", "P0" (backplane), "SwTrg", "LVDS", "ITLA", "ITLB",
 # "ITLA_AND_ITLB", "ITLA_OR_ITLB", "GPIO", "TestPulse", "UserTrg"
@@ -51,6 +58,10 @@ dc_offset = 50.0 # 0..100..0.001
 # trigger threshold can be a single number for each
 # channel or a map for each channel in the range
 # -65536..65536 in ADC units
+# ensure the +/- of the value matches with that
+# of the trigger edge to make sense
+# Fall -> -
+# Rise -> +
 # [board_settings.trig_thr]
 # "1" = -20
 # "2" = -40
@@ -63,11 +74,7 @@ trig_thr = -20 # -65536..65536..1
 # "2" = "Absolute"
 trig_thr_mode = "Relative" # or "Absolute"
 
-# trigger edge can be chosen for all
-# channels or each individual channel
-# [board_settings.trig_edge]
-# "1" = "Rise"
-# "2" = "Fall"
+# which pulse edge to trigger on
 trig_edge = "Fall" # or "Rise"
 
 # samples over threshold can be chosen for all
@@ -90,6 +97,29 @@ itl_retrig = "True"     # or "False"
 # "1" = "ITLA"
 # "2" = "Disabled"
 itl_connect = "ITLA" # or "Disabled"
+
+# these are the settings for the second board
+# with options same as the first
+[[board_settings.boards]]
+en_chans = true
+trig_source = "SwTrg | TestPulse"
+io_level = "TTL"
+test_pulse_period = 8333333
+test_pulse_width = 1000
+test_pulse_low = 0
+test_pulse_high = 10000
+dc_offset = 50.0
+trig_thr = -20
+trig_thr_mode = "Relative"
+trig_edge = "Fall"
+samples_over_thr = 5
+itl_logic = "OR"
+itl_majority_level = 4
+itl_pair_logic = "NONE"
+itl_polarity = "Direct"
+itl_gatewidth = 1000
+itl_retrig = "True"
+itl_connect = "ITLA"
 
 [sync_settings]
 primary_clock_src = "Internal" # or FPClkIn

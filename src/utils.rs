@@ -3,7 +3,6 @@ use crate::{
     TriggerEdge, TriggerThr, TriggerThrMode,
 };
 use std::{
-    arch::x86_64::_MM_ROUND_TOWARD_ZERO,
     collections::VecDeque,
     time::{Duration, Instant},
 };
@@ -113,8 +112,8 @@ impl Counter {
     }
 }
 
-pub fn configure_board(handle: u64, config: &Conf) -> Result<(), FELibReturn> {
-    match config.board_settings.en_chans {
+pub fn configure_board(board_id: usize, handle: u64, config: &Conf) -> Result<(), FELibReturn> {
+    match config.board_settings.boards[board_id].en_chans {
         ChannelConfig::All(_) => {
             crate::felib_setvalue(handle, "/ch/0..63/par/ChEnable", "true")?;
         }
@@ -125,7 +124,7 @@ pub fn configure_board(handle: u64, config: &Conf) -> Result<(), FELibReturn> {
             }
         }
     }
-    match config.board_settings.dc_offset {
+    match config.board_settings.boards[board_id].dc_offset {
         DCOffsetConfig::Global(offset) => {
             crate::felib_setvalue(handle, "/ch/0..63/par/DCOffset", &offset.to_string())?;
         }
@@ -140,40 +139,52 @@ pub fn configure_board(handle: u64, config: &Conf) -> Result<(), FELibReturn> {
     crate::felib_setvalue(
         handle,
         "/par/RecordLengthS",
-        &config.board_settings.record_len.to_string(),
+        &config.board_settings.common.record_len.to_string(),
     )?;
     crate::felib_setvalue(
         handle,
         "/par/PreTriggerS",
-        &config.board_settings.pre_trig_len.to_string(),
+        &config.board_settings.common.pre_trig_len.to_string(),
     )?;
     crate::felib_setvalue(
         handle,
         "/par/AcqTriggerSource",
-        &config.board_settings.trig_source,
+        &config.board_settings.boards[board_id].trig_source,
     )?;
-    crate::felib_setvalue(handle, "/par/IOlevel", &config.board_settings.io_level)?;
+    crate::felib_setvalue(
+        handle,
+        "/par/IOlevel",
+        &config.board_settings.boards[board_id].io_level,
+    )?;
     crate::felib_setvalue(
         handle,
         "/par/TestPulsePeriod",
-        &config.board_settings.test_pulse_period.to_string(),
+        &config.board_settings.boards[board_id]
+            .test_pulse_period
+            .to_string(),
     )?;
     crate::felib_setvalue(
         handle,
         "/par/TestPulseWidth",
-        &config.board_settings.test_pulse_width.to_string(),
+        &config.board_settings.boards[board_id]
+            .test_pulse_width
+            .to_string(),
     )?;
     crate::felib_setvalue(
         handle,
         "/par/TestPulseLowLevel",
-        &config.board_settings.test_pulse_low.to_string(),
+        &config.board_settings.boards[board_id]
+            .test_pulse_low
+            .to_string(),
     )?;
     crate::felib_setvalue(
         handle,
         "/par/TestPulseHighLevel",
-        &config.board_settings.test_pulse_high.to_string(),
+        &config.board_settings.boards[board_id]
+            .test_pulse_high
+            .to_string(),
     )?;
-    match config.board_settings.trig_thr {
+    match config.board_settings.boards[board_id].trig_thr {
         TriggerThr::Global(thr) => {
             crate::felib_setvalue(handle, "/ch/0..63/par/TriggerThr", &thr.to_string())?;
         }
@@ -185,7 +196,7 @@ pub fn configure_board(handle: u64, config: &Conf) -> Result<(), FELibReturn> {
             }
         }
     }
-    match config.board_settings.trig_thr_mode {
+    match config.board_settings.boards[board_id].trig_thr_mode {
         TriggerThrMode::Global(ref mode) => {
             crate::felib_setvalue(handle, "/ch/0..63/par/TriggerThrMode", mode)?;
         }
@@ -197,19 +208,15 @@ pub fn configure_board(handle: u64, config: &Conf) -> Result<(), FELibReturn> {
             }
         }
     }
-    match config.board_settings.trig_edge {
-        TriggerEdge::Global(ref edge) => {
-            crate::felib_setvalue(handle, "/ch/0..63/par/SelfTriggerEdge", edge)?;
+    match config.board_settings.boards[board_id].trig_edge {
+        TriggerEdge::Fall => {
+            crate::felib_setvalue(handle, "/ch/0..63/par/SelfTriggerEdge", "Fall")?;
         }
-        TriggerEdge::PerChannel(ref map) => {
-            for (chan, edge) in map {
-                let path = format!("/ch/{}/par/SelfTriggerEdge", chan);
-
-                crate::felib_setvalue(handle, &path, edge)?;
-            }
+        TriggerEdge::Rise => {
+            crate::felib_setvalue(handle, "/ch/0..63/par/SelfTriggerEdge", "Rise")?;
         }
     }
-    match config.board_settings.samples_over_thr {
+    match config.board_settings.boards[board_id].samples_over_thr {
         SamplesOverThr::Global(samples) => {
             crate::felib_setvalue(
                 handle,
@@ -228,34 +235,38 @@ pub fn configure_board(handle: u64, config: &Conf) -> Result<(), FELibReturn> {
     crate::felib_setvalue(
         handle,
         "/par/ITLAMainLogic",
-        &config.board_settings.itl_logic,
+        &config.board_settings.boards[board_id].itl_logic,
     )?;
     crate::felib_setvalue(
         handle,
         "/par/ITLAMajorityLev",
-        &config.board_settings.itl_majority_level.to_string(),
+        &config.board_settings.boards[board_id]
+            .itl_majority_level
+            .to_string(),
     )?;
     crate::felib_setvalue(
         handle,
         "/par/ITLAPairLogic",
-        &config.board_settings.itl_pair_logic,
+        &config.board_settings.boards[board_id].itl_pair_logic,
     )?;
     crate::felib_setvalue(
         handle,
         "/par/ITLAPolarity",
-        &config.board_settings.itl_polarity,
+        &config.board_settings.boards[board_id].itl_polarity,
     )?;
     crate::felib_setvalue(
         handle,
         "/par/ITLAGateWidth",
-        &config.board_settings.itl_gatewidth.to_string(),
+        &config.board_settings.boards[board_id]
+            .itl_gatewidth
+            .to_string(),
     )?;
     crate::felib_setvalue(
         handle,
         "/par/ITLAEnRetrigger",
-        &config.board_settings.itl_retrig,
+        &config.board_settings.boards[board_id].itl_retrig,
     )?;
-    match config.board_settings.itl_connect {
+    match config.board_settings.boards[board_id].itl_connect {
         ITLConnect::Global(ref connect) => {
             crate::felib_setvalue(handle, "/ch/0..63/par/ITLConnect", connect)?;
         }

@@ -1,9 +1,12 @@
-use crate::{BoardEvent, Conf, Counter, EventWrapper, FELibReturn, HDF5Writer};
+use crate::{
+    BoardEvent, Conf, Counter, EventWrapper, FELibReturn, HDF5Writer, TriggerEdge, TriggerThr,
+};
 use anyhow::{anyhow, Result};
 use crossbeam_channel::{tick, unbounded, Receiver, RecvError, Sender};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use ndarray::Axis;
 use ndarray::{parallel::prelude::*, s};
+use rand::Rng;
 use ratatui::{
     layout::{Constraint, Direction, Flex, Layout},
     style::{Color, Style, Stylize},
@@ -92,8 +95,8 @@ impl Tui {
             for &(_, dev_handle) in &self.boards {
                 crate::felib_sendcommand(dev_handle, "/cmd/reset")?;
             }
-            for &(_, dev_handle) in &self.boards {
-                crate::configure_board(dev_handle, &self.config)?;
+            for &(i, dev_handle) in &self.boards {
+                crate::configure_board(i, dev_handle, &self.config)?;
             }
             for &(i, dev_handle) in &self.boards {
                 crate::configure_sync(
@@ -538,7 +541,7 @@ fn event_processing(
     let mut writer = HDF5Writer::new(
         run_file,
         64,
-        config.board_settings.record_len,
+        config.board_settings.common.record_len,
         config.run_settings.boards.len(),
         7500,
         50,
@@ -549,10 +552,16 @@ fn event_processing(
 
     let mut queue0 = VecDeque::new();
     let mut queue1 = VecDeque::new();
+    let mut rng = rand::rng();
+    let zs_level = config.run_settings.zs_level;
 
     loop {
         match rx.recv() {
             Ok(mut board_event) => {
+                let r: f64 = rng.random();
+                if r > zs_level {
+                    zero_suppress(&mut board_event, &config);
+                }
                 // zero_suppress(&mut board_event);
                 match board_event.board_id {
                     0 => queue0.push_back(board_event),
@@ -669,7 +678,7 @@ fn data_taking_thread(
     // Data-taking loop.
     // num_ch has to be 64 due to the way CAEN reads data from the board
     let num_ch = 64;
-    let waveform_len = config.board_settings.record_len;
+    let waveform_len = config.board_settings.common.record_len;
     let mut event = EventWrapper::new(num_ch, waveform_len);
     loop {
         if shutdown.load(Ordering::SeqCst) {
@@ -700,36 +709,66 @@ fn data_taking_thread(
     Ok(())
 }
 
-enum Edge {
-    Rise,
-    Fall,
-}
-
 /// suppress adc samples from digitizer based on user-defined threshold
 /// relative to baseline and whether or not the pulses are rising or
 /// falling and will not suppress and random channel specified by user
-fn zero_suppress(board_data: &mut BoardEvent, threshold: u16, edge: Edge, rand_chan: usize) {
-    board_data
-        .event
-        .waveform_data
-        .axis_iter_mut(Axis(0))
-        .into_par_iter()
-        .enumerate()
-        .map(|(i, mut channel)| {
-            if i != rand_chan {
-                let baseline = channel.slice(s![0..125]).mean().unwrap_or(0);
-                match edge {
-                    Edge::Rise => channel.map_inplace(|adc| {
-                        if *adc - baseline < threshold {
-                            *adc = 0
+fn zero_suppress(board_data: &mut BoardEvent, config: &Conf) {
+    let board_id = board_data.board_id;
+    let edge = config.board_settings.boards[board_id].trig_edge.clone();
+    match config.board_settings.boards[board_id].trig_thr {
+        TriggerThr::Global(threshold) => {
+            board_data
+                .event
+                .waveform_data
+                .axis_iter_mut(Axis(0))
+                .into_par_iter()
+                .for_each(|mut channel| match edge {
+                    TriggerEdge::Rise => {
+                        let baseline = channel.slice(s![0..125]).mean().unwrap_or(u16::MIN);
+                        channel.map_inplace(|adc| {
+                            if *adc - baseline < threshold as u16 {
+                                *adc = 0
+                            }
+                        })
+                    }
+                    TriggerEdge::Fall => {
+                        let baseline = channel.slice(s![0..125]).mean().unwrap_or(u16::MAX);
+                        channel.map_inplace(|adc| {
+                            if *adc - baseline > (-1 * threshold) as u16 {
+                                *adc = 0
+                            }
+                        })
+                    }
+                });
+        }
+        TriggerThr::PerChannel(ref map) => {
+            board_data
+                .event
+                .waveform_data
+                .axis_iter_mut(Axis(0))
+                .into_par_iter()
+                .enumerate()
+                .for_each(|(i, mut channel)| {
+                    let threshold = *map.get(&i.to_string()).unwrap();
+                    match edge {
+                        TriggerEdge::Rise => {
+                            let baseline = channel.slice(s![0..125]).mean().unwrap_or(u16::MIN);
+                            channel.map_inplace(|adc| {
+                                if *adc - baseline < threshold as u16 {
+                                    *adc = 0
+                                }
+                            })
                         }
-                    }),
-                    Edge::Fall => channel.map_inplace(|adc| {
-                        if *adc - baseline > threshold {
-                            *adc = 0
+                        TriggerEdge::Fall => {
+                            let baseline = channel.slice(s![0..125]).mean().unwrap_or(u16::MAX);
+                            channel.map_inplace(|adc| {
+                                if *adc - baseline > (-1 * threshold) as u16 {
+                                    *adc = 0
+                                }
+                            })
                         }
-                    }),
-                }
-            }
-        });
+                    }
+                });
+        }
+    }
 }

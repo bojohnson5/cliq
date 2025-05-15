@@ -22,13 +22,24 @@ pub struct RunSettings {
     pub blosc_threads: u8,
     #[config(default = 2)]
     pub compression_level: u8,
+    pub zs_level: f64,
 }
 
 #[derive(Config, Debug, Clone)]
 pub struct BoardSettings {
-    pub en_chans: ChannelConfig,
+    pub common: CommonSettings,
+    pub boards: Vec<PerBoardSettings>,
+}
+
+#[derive(Deserialize, Config, Debug, Clone)]
+pub struct CommonSettings {
     pub record_len: usize,
     pub pre_trig_len: usize,
+}
+
+#[derive(Deserialize, Config, Debug, Clone)]
+pub struct PerBoardSettings {
+    pub en_chans: ChannelConfig,
     pub trig_source: String,
     pub dc_offset: DCOffsetConfig,
     pub io_level: String,
@@ -94,10 +105,9 @@ pub enum TriggerThrMode {
 }
 
 #[derive(Deserialize, Clone, Debug)]
-#[serde(untagged)]
 pub enum TriggerEdge {
-    Global(String),
-    PerChannel(HashMap<String, String>),
+    Fall,
+    Rise,
 }
 
 #[derive(Deserialize, Clone, Debug)]

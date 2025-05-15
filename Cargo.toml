@@ -14,6 +14,7 @@ libc = "0.2.171"
 crossbeam-channel = "0.5.15"
 clap = { version = "4.5.35", features = ["derive"] }
 ratatui = "0.29.0"
+rand = "0.9.1"
 
 [build-dependencies]
 bindgen = "0.71.0"
