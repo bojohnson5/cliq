@@ -616,6 +616,7 @@ fn event_processing(
                         )
                         .unwrap();
                 }
+                events.clear();
             }
         }
 
