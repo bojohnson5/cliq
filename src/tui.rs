@@ -333,7 +333,7 @@ impl Tui {
                 " Events: ".into(),
                 self.counter.n_events.to_string().yellow(),
                 " Data rate: ".into(),
-                format!("{:.2}", self.counter.rate()).yellow(),
+                format!("{:.2}", self.counter.average_rate()).yellow(),
                 " MB/s ".into(),
                 " Buffer length: ".into(),
                 self.buffer_len.to_string().yellow(),
