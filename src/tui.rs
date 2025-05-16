@@ -43,10 +43,9 @@ impl From<FELibReturn> for DaqError {
     }
 }
 
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone)]
 struct RunInfo {
-    pub board0_event_size: usize,
-    pub board1_event_size: usize,
+    pub event_sizes: Vec<usize>,
     pub event_channel_buf: usize,
     pub misaligned_events: usize,
     pub dropped_events: usize,
@@ -54,7 +53,7 @@ struct RunInfo {
 
 impl RunInfo {
     fn event_size(&self) -> usize {
-        self.board0_event_size + self.board1_event_size
+        self.event_sizes.iter().sum()
     }
 }
 
@@ -253,17 +252,16 @@ impl Tui {
 
         let inner_layout = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints(vec![Constraint::Percentage(50), Constraint::Percentage(50)])
+            .constraints(vec![Constraint::Fill(1); self.boards.len()])
             .split(outer_layout[1]);
 
         let run_stats = self.run_stats_paragraph();
         frame.render_widget(run_stats, outer_layout[0]);
 
-        let board0_status = self.board_status_paragraph(0);
-        frame.render_widget(board0_status, inner_layout[0]);
-
-        let board1_status = self.board_status_paragraph(1);
-        frame.render_widget(board1_status, inner_layout[1]);
+        for &(i, _) in &self.boards {
+            let board_status = self.board_status_paragraph(i);
+            frame.render_widget(board_status, inner_layout[i]);
+        }
 
         if let Some(err) = &self.show_popup {
             let block = Block::bordered().title("DAQ Error").bold();
@@ -538,6 +536,9 @@ fn event_processing(
     let mut dropped_count = 0;
     let mut curr_trig_id = 0;
 
+    let num_boards = config.run_settings.boards.len();
+    let mut events = Vec::with_capacity(num_boards);
+
     let mut writer = HDF5Writer::new(
         run_file,
         64,
@@ -550,8 +551,10 @@ fn event_processing(
     )
     .unwrap();
 
-    let mut queue0 = VecDeque::new();
-    let mut queue1 = VecDeque::new();
+    let mut queues = Vec::with_capacity(num_boards);
+    for _ in 0..num_boards {
+        queues.push(VecDeque::new());
+    }
     let mut rng = rand::rng();
     let zs_level = config.run_settings.zs_level;
 
@@ -562,12 +565,7 @@ fn event_processing(
                 if r > zs_level {
                     zero_suppress(&mut board_event, &config);
                 }
-                // zero_suppress(&mut board_event);
-                match board_event.board_id {
-                    0 => queue0.push_back(board_event),
-                    1 => queue1.push_back(board_event),
-                    _ => unreachable!(),
-                }
+                queues[board_event.board_id].push_back(board_event);
             }
             Err(RecvError) => {
                 writer.flush_all().unwrap();
@@ -575,25 +573,27 @@ fn event_processing(
             }
         }
 
-        if queue0.front().is_some() && queue1.front().is_some() {
-            crate::align_queues(&mut queue0, &mut queue1, &mut misaligned_count);
+        if queues.iter().all(|q| q.front().is_some()) {
+            // if queue0.front().is_some() && queue1.front().is_some() {
+            crate::align_queues(&mut queues, &mut misaligned_count);
 
-            if let (Some(e0), Some(e1)) = (queue0.front(), queue1.front()) {
-                let trgid0 = e0.event.c_event.trigger_id;
-                let _trgid1 = e1.event.c_event.trigger_id;
+            if queues.iter().all(|q| q.front().is_some()) {
+                // if let (Some(e0), Some(e1)) = (queue0.front(), queue1.front()) {
+                let trgid = queues[0].front().unwrap().event.c_event.trigger_id;
+                // let _trgid1 = e1.event.c_event.trigger_id;
 
-                if trgid0 != curr_trig_id {
-                    dropped_count += (trgid0 as isize - curr_trig_id as isize).abs() as usize;
+                if trgid != curr_trig_id {
+                    dropped_count += (trgid as isize - curr_trig_id as isize).abs() as usize;
                 }
 
-                curr_trig_id = trgid0 + 1;
+                curr_trig_id = trgid + 1;
 
-                let event0 = queue0.pop_front().unwrap();
-                let event1 = queue1.pop_front().unwrap();
+                for queue in queues.iter_mut() {
+                    events.push(queue.pop_front().unwrap());
+                }
 
                 let run_info = RunInfo {
-                    board0_event_size: event0.event.c_event.event_size,
-                    board1_event_size: event1.event.c_event.event_size,
+                    event_sizes: events.iter().map(|e| e.event.c_event.event_size).collect(),
                     event_channel_buf: rx.len(),
                     misaligned_events: misaligned_count,
                     dropped_events: dropped_count,
@@ -604,26 +604,18 @@ fn event_processing(
                     return Err(DaqError::EventProcessingTransit);
                 }
 
-                writer
-                    .append_event(
-                        event0.board_id,
-                        event0.event.c_event.timestamp,
-                        &event0.event.waveform_data,
-                        event0.event.c_event.trigger_id,
-                        event0.event.c_event.flags,
-                        event0.event.c_event.board_fail,
-                    )
-                    .unwrap();
-                writer
-                    .append_event(
-                        event1.board_id,
-                        event1.event.c_event.timestamp,
-                        &event1.event.waveform_data,
-                        event1.event.c_event.trigger_id,
-                        event1.event.c_event.flags,
-                        event1.event.c_event.board_fail,
-                    )
-                    .unwrap();
+                for event in &events {
+                    writer
+                        .append_event(
+                            event.board_id,
+                            event.event.c_event.timestamp,
+                            &event.event.waveform_data,
+                            event.event.c_event.trigger_id,
+                            event.event.c_event.flags,
+                            event.event.c_event.board_fail,
+                        )
+                        .unwrap();
+                }
             }
         }
 

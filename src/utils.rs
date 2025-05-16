@@ -282,6 +282,26 @@ pub fn configure_board(board_id: usize, handle: u64, config: &Conf) -> Result<()
     Ok(())
 }
 
+pub fn configure_one(handle: u64, config: &Conf) -> Result<(), FELibReturn> {
+    crate::felib_setvalue(
+        handle,
+        "/par/ClockSource",
+        &config.sync_settings.primary_clock_src,
+    )?;
+    crate::felib_setvalue(
+        handle,
+        "/par/StartSource",
+        &config.sync_settings.primary_start_source,
+    )?;
+    crate::felib_setvalue(
+        handle,
+        "/par/EnAutoDisarmAcq",
+        &config.sync_settings.auto_disarm,
+    )?;
+
+    Ok(())
+}
+
 pub fn configure_sync(
     handle: u64,
     board_id: isize,
@@ -289,6 +309,10 @@ pub fn configure_sync(
     config: &Conf,
 ) -> Result<(), FELibReturn> {
     let first_board = board_id == 0;
+
+    if num_boards == 1 {
+        return configure_one(handle, config);
+    }
 
     crate::felib_setvalue(
         handle,
@@ -333,7 +357,7 @@ pub fn configure_sync(
     )?;
     crate::felib_setvalue(handle, "/par/TrgOutMode", &config.sync_settings.trig_out)?;
 
-    let run_delay = get_run_dealy(board_id, num_boards);
+    let run_delay = get_run_delay(board_id, num_boards);
     let clock_out_delay = get_clock_out_delay(board_id, num_boards);
     crate::felib_setvalue(handle, "/par/RunDelay", &run_delay.to_string())?;
     crate::felib_setvalue(
@@ -358,7 +382,7 @@ fn get_clock_out_delay(board_id: isize, num_boards: isize) -> isize {
     }
 }
 
-fn get_run_dealy(board_id: isize, num_boards: isize) -> isize {
+fn get_run_delay(board_id: isize, num_boards: isize) -> isize {
     let first_board = board_id == 0;
     let board_id_from_last = num_boards - board_id - 1;
 
@@ -371,30 +395,39 @@ fn get_run_dealy(board_id: isize, num_boards: isize) -> isize {
     run_delay_clk * 8
 }
 
-/// Drops from whichever queue has the smaller trigger_id,
-/// incrementing `misaligned_count` for each drop, until
-/// both fronts agree (or one runs dry).
-pub fn align_queues(
-    queue0: &mut VecDeque<BoardEvent>,
-    queue1: &mut VecDeque<BoardEvent>,
-    misaligned_count: &mut usize,
-) {
+/// Repeatedly drops “stale” events from each queue until all
+/// non‑empty queue fronts share the same trigger ID (or until
+/// one queue becomes empty), counting each drop in `misaligned_count`.
+pub fn align_queues(queues: &mut [VecDeque<BoardEvent>], misaligned_count: &mut usize) {
     loop {
-        match (queue0.front(), queue1.front()) {
-            (Some(e0), Some(e1)) if e0.event.c_event.trigger_id == e1.event.c_event.trigger_id => {
-                // aligned!
-                break;
-            }
-            (Some(e0), Some(e1)) => {
-                *misaligned_count += 1;
-                if e0.event.c_event.trigger_id < e1.event.c_event.trigger_id {
-                    queue0.pop_front();
+        // If any queue is empty, we can’t fully align
+        if queues.iter().any(|q| q.front().is_none()) {
+            break;
+        }
+
+        // Gather all front trigger IDs
+        let ids = queues
+            .iter()
+            .map(|q| q.front().unwrap().event.c_event.trigger_id)
+            .collect::<Vec<_>>();
+
+        // If they’re already all equal, we’re done
+        if ids.windows(2).all(|w| w[0] == w[1]) {
+            break;
+        }
+
+        // Otherwise drop any event whose ID is less than the current maximum
+        let max_id = *ids.iter().max().unwrap();
+        for q in queues.iter_mut() {
+            while let Some(e) = q.front() {
+                let tid = e.event.c_event.trigger_id;
+                if tid < max_id {
+                    q.pop_front();
+                    *misaligned_count += 1;
                 } else {
-                    queue1.pop_front();
+                    break;
                 }
             }
-            // if either queue is empty, nothing more to do
-            _ => break,
         }
     }
 }
