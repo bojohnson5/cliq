@@ -4,6 +4,7 @@ use crate::{
 use anyhow::{anyhow, Result};
 use crossbeam_channel::{tick, unbounded, Receiver, RecvError, Sender};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
+use log::debug;
 use ndarray::Axis;
 use ndarray::{parallel::prelude::*, s};
 use rand::Rng;
@@ -15,6 +16,8 @@ use ratatui::{
     widgets::{Block, Clear, Paragraph},
     DefaultTerminal, Frame,
 };
+use simplelog::{Config, WriteLogger};
+use std::fs::File;
 use std::{
     collections::VecDeque,
     fs::DirEntry,
@@ -538,6 +541,12 @@ fn event_processing(
 
     let num_boards = config.run_settings.boards.len();
     let mut events = Vec::with_capacity(num_boards);
+    WriteLogger::init(
+        simplelog::LevelFilter::Debug,
+        Config::default(),
+        File::create("debug.log").unwrap(),
+    )
+    .unwrap();
 
     let mut writer = HDF5Writer::new(
         run_file,
@@ -562,6 +571,7 @@ fn event_processing(
         match rx.recv() {
             Ok(mut board_event) => {
                 let r: f64 = rng.random();
+                debug!("rand: {r}");
                 if r > zs_level {
                     zero_suppress(&mut board_event, &config);
                 }
@@ -704,7 +714,7 @@ fn data_taking_thread(
 
 /// suppress adc samples from digitizer based on user-defined threshold
 /// relative to baseline and whether or not the pulses are rising or
-/// falling and will not suppress and random channel specified by user
+/// falling
 fn zero_suppress(board_data: &mut BoardEvent, config: &Conf) {
     let board_id = board_data.board_id;
     let edge = config.board_settings.boards[board_id].trig_edge.clone();
