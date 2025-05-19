@@ -1,5 +1,5 @@
 use crate::{
-    BoardEvent, Conf, Counter, EventWrapper, FELibReturn, HDF5Writer, TriggerEdge, TriggerThr,
+    BoardEvent, Conf, Counter, EventWrapper, FELibReturn, HDF5Writer, ZeroSuppressionEdge,
 };
 use anyhow::{anyhow, Result};
 use crossbeam_channel::{tick, unbounded, Receiver, RecvError, Sender};
@@ -566,6 +566,8 @@ fn event_processing(
     }
     let mut rng = rand::rng();
     let zs_level = config.run_settings.zs_level;
+    let zs_threshold = config.run_settings.zs_threshold;
+    let zs_edge = config.run_settings.zs_edge;
 
     loop {
         match rx.recv() {
@@ -573,7 +575,7 @@ fn event_processing(
                 let r: f64 = rng.random();
                 debug!("rand: {r}");
                 if r > zs_level {
-                    zero_suppress(&mut board_event, &config);
+                    zero_suppress(&mut board_event, zs_threshold, zs_edge);
                 }
                 queues[board_event.board_id].push_back(board_event);
             }
@@ -715,63 +717,28 @@ fn data_taking_thread(
 /// suppress adc samples from digitizer based on user-defined threshold
 /// relative to baseline and whether or not the pulses are rising or
 /// falling
-fn zero_suppress(board_data: &mut BoardEvent, config: &Conf) {
-    let board_id = board_data.board_id;
-    let edge = config.board_settings.boards[board_id].trig_edge.clone();
-    match config.board_settings.boards[board_id].trig_thr {
-        TriggerThr::Global(threshold) => {
-            board_data
-                .event
-                .waveform_data
-                .axis_iter_mut(Axis(0))
-                .into_par_iter()
-                .for_each(|mut channel| match edge {
-                    TriggerEdge::Rise => {
-                        let baseline = channel.slice(s![0..125]).mean().unwrap_or(u16::MIN);
-                        channel.map_inplace(|adc| {
-                            if *adc - baseline < threshold as u16 {
-                                *adc = 0
-                            }
-                        })
+fn zero_suppress(board_data: &mut BoardEvent, threshold: u16, edge: ZeroSuppressionEdge) {
+    board_data
+        .event
+        .waveform_data
+        .axis_iter_mut(Axis(0))
+        .into_par_iter()
+        .for_each(|mut channel| match edge {
+            ZeroSuppressionEdge::Rise => {
+                let baseline = channel.slice(s![0..125]).mean().unwrap_or(u16::MIN);
+                channel.map_inplace(|adc| {
+                    if *adc - baseline < threshold {
+                        *adc = 0
                     }
-                    TriggerEdge::Fall => {
-                        let baseline = channel.slice(s![0..125]).mean().unwrap_or(u16::MAX);
-                        channel.map_inplace(|adc| {
-                            if *adc - baseline > (-1 * threshold) as u16 {
-                                *adc = 0
-                            }
-                        })
+                })
+            }
+            ZeroSuppressionEdge::Fall => {
+                let baseline = channel.slice(s![0..125]).mean().unwrap_or(u16::MAX);
+                channel.map_inplace(|adc| {
+                    if *adc - baseline > threshold {
+                        *adc = 0
                     }
-                });
-        }
-        TriggerThr::PerChannel(ref map) => {
-            board_data
-                .event
-                .waveform_data
-                .axis_iter_mut(Axis(0))
-                .into_par_iter()
-                .enumerate()
-                .for_each(|(i, mut channel)| {
-                    let threshold = *map.get(&i.to_string()).unwrap();
-                    match edge {
-                        TriggerEdge::Rise => {
-                            let baseline = channel.slice(s![0..125]).mean().unwrap_or(u16::MIN);
-                            channel.map_inplace(|adc| {
-                                if *adc - baseline < threshold as u16 {
-                                    *adc = 0
-                                }
-                            })
-                        }
-                        TriggerEdge::Fall => {
-                            let baseline = channel.slice(s![0..125]).mean().unwrap_or(u16::MAX);
-                            channel.map_inplace(|adc| {
-                                if *adc - baseline > (-1 * threshold) as u16 {
-                                    *adc = 0
-                                }
-                            })
-                        }
-                    }
-                });
-        }
-    }
+                })
+            }
+        });
 }

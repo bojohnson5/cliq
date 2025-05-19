@@ -23,6 +23,8 @@ pub struct RunSettings {
     #[config(default = 2)]
     pub compression_level: u8,
     pub zs_level: f64,
+    pub zs_threshold: u16,
+    pub zs_edge: ZeroSuppressionEdge,
 }
 
 #[derive(Config, Debug, Clone)]
@@ -122,4 +124,10 @@ pub enum SamplesOverThr {
 pub enum ITLConnect {
     Global(String),
     PerChannel(HashMap<String, String>),
+}
+
+#[derive(Deserialize, Clone, Debug, Copy)]
+pub enum ZeroSuppressionEdge {
+    Fall,
+    Rise,
 }
