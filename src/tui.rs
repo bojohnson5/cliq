@@ -4,7 +4,7 @@ use crate::{
 use anyhow::{anyhow, Result};
 use crossbeam_channel::{tick, unbounded, Receiver, RecvError, Sender};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
-use log::debug;
+use log::info;
 use ndarray::Axis;
 use ndarray::{parallel::prelude::*, s};
 use rand::Rng;
@@ -16,8 +16,6 @@ use ratatui::{
     widgets::{Block, Clear, Paragraph},
     DefaultTerminal, Frame,
 };
-use simplelog::{Config, WriteLogger};
-use std::fs::File;
 use std::{
     collections::VecDeque,
     fs::DirEntry,
@@ -108,11 +106,13 @@ impl Tui {
                     &self.config,
                 )?;
             }
+            info!("Reset and configured digitizer(s)");
 
             let shutdown = Arc::new(AtomicBool::new(false));
             let (tx_stats, rx_stats) = unbounded();
             let (tx_events, ev_handle, board_handles) =
                 self.begin_run(Arc::clone(&shutdown), tx_stats)?;
+            info!("Beginning run {}", self.run_num);
 
             self.t_begin = Instant::now();
             self.exit = None;
@@ -222,7 +222,6 @@ impl Tui {
                 }
                 return Ok(());
             }
-            // else (Timeout) start next run automatically
         }
     }
 
@@ -305,7 +304,10 @@ impl Tui {
 
     fn handle_key_event(&mut self, key_event: KeyEvent) {
         match key_event.code {
-            KeyCode::Char('q') => self.exit(),
+            KeyCode::Char('q') => {
+                info!("User exited DAQ");
+                self.exit()
+            }
             _ => {}
         }
     }
@@ -534,6 +536,7 @@ fn event_processing(
     config: Conf,
     shutdown: Arc<AtomicBool>,
 ) -> Result<(), DaqError> {
+    info!("Started event processing thread");
     // new counters
     let mut misaligned_count = 0;
     let mut dropped_count = 0;
@@ -541,12 +544,6 @@ fn event_processing(
 
     let num_boards = config.run_settings.boards.len();
     let mut events = Vec::with_capacity(num_boards);
-    WriteLogger::init(
-        simplelog::LevelFilter::Debug,
-        Config::default(),
-        File::create("debug.log").unwrap(),
-    )
-    .unwrap();
 
     let mut writer = HDF5Writer::new(
         run_file,
@@ -573,7 +570,6 @@ fn event_processing(
         match rx.recv() {
             Ok(mut board_event) => {
                 let r: f64 = rng.random();
-                debug!("rand: {r}");
                 if r > zs_level {
                     zero_suppress(&mut board_event, zs_threshold, zs_edge);
                 }
@@ -638,6 +634,7 @@ fn event_processing(
         }
     }
 
+    info!("Ending event processing thread");
     drop(tx_stats);
     Ok(())
 }
@@ -654,6 +651,7 @@ fn data_taking_thread(
     endpoint_configured: Arc<(Mutex<u32>, Condvar)>,
     shutdown: Arc<AtomicBool>,
 ) -> Result<(), DaqError> {
+    info!("Started data taking thread for board {board_id}");
     // Set up endpoint.
     let mut ep_handle = 0;
     let mut ep_folder_handle = 0;
@@ -710,6 +708,7 @@ fn data_taking_thread(
         }
     }
 
+    info!("Ending data taking thread for board {board_id}");
     drop(tx);
     Ok(())
 }

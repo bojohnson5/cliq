@@ -2,6 +2,8 @@ use anyhow::Result;
 use clap::Parser;
 use confique::Config;
 use rust_daq::*;
+use simplelog::WriteLogger;
+use std::fs::OpenOptions;
 
 /// LAr DAQ program
 #[derive(Parser, Debug)]
@@ -26,6 +28,19 @@ fn main() -> Result<()> {
         let dev_handle = felib_open(url)?;
         boards.push((i, dev_handle));
     }
+
+    let log_file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("daq.log")
+        .unwrap();
+
+    WriteLogger::init(
+        simplelog::LevelFilter::Debug,
+        simplelog::Config::default(),
+        log_file,
+    )
+    .unwrap();
 
     let mut terminal = ratatui::init();
     let status = Tui::new(config, boards, args.runs).run(&mut terminal);
