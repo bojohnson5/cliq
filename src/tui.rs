@@ -716,7 +716,7 @@ fn data_taking_thread(
 /// suppress adc samples from digitizer based on user-defined threshold
 /// relative to baseline and whether or not the pulses are rising or
 /// falling
-fn zero_suppress(board_data: &mut BoardEvent, threshold: u16, edge: ZeroSuppressionEdge) {
+fn zero_suppress(board_data: &mut BoardEvent, threshold: f64, edge: ZeroSuppressionEdge) {
     board_data
         .event
         .waveform_data
@@ -724,17 +724,19 @@ fn zero_suppress(board_data: &mut BoardEvent, threshold: u16, edge: ZeroSuppress
         .into_par_iter()
         .for_each(|mut channel| match edge {
             ZeroSuppressionEdge::Rise => {
-                let baseline = channel.slice(s![0..125]).mean().unwrap_or(u16::MIN);
+                let baseline = channel.slice(s![0..125]).mean().unwrap_or(u16::MIN) as f64;
                 channel.map_inplace(|adc| {
-                    if *adc - baseline < threshold {
+                    let x = *adc as f64;
+                    if x - baseline < threshold {
                         *adc = 0
                     }
                 })
             }
             ZeroSuppressionEdge::Fall => {
-                let baseline = channel.slice(s![0..125]).mean().unwrap_or(u16::MAX);
+                let baseline = channel.slice(s![0..125]).mean().unwrap_or(u16::MAX) as f64;
                 channel.map_inplace(|adc| {
-                    if *adc - baseline > threshold {
+                    let x = *adc as f64;
+                    if x - baseline > threshold {
                         *adc = 0
                     }
                 })

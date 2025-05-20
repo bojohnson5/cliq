@@ -23,7 +23,7 @@ pub struct RunSettings {
     #[config(default = 2)]
     pub compression_level: u8,
     pub zs_level: f64,
-    pub zs_threshold: u16,
+    pub zs_threshold: f64,
     pub zs_edge: ZeroSuppressionEdge,
 }
 
