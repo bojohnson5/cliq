@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::Parser;
 use confique::Config;
 use rust_daq::*;
-use simplelog::WriteLogger;
+use simplelog::{format_description, ConfigBuilder, WriteLogger};
 use std::fs::OpenOptions;
 
 /// LAr DAQ program
@@ -35,12 +35,13 @@ fn main() -> Result<()> {
         .open("daq.log")
         .unwrap();
 
-    WriteLogger::init(
-        simplelog::LevelFilter::Debug,
-        simplelog::Config::default(),
-        log_file,
-    )
-    .unwrap();
+    let log_config = ConfigBuilder::new()
+        .set_time_format_custom(format_description!(
+            "[year]-[month]-[day] [hour]:[minute]:[second]"
+        ))
+        .build();
+
+    WriteLogger::init(simplelog::LevelFilter::Debug, log_config, log_file).unwrap();
 
     let mut terminal = ratatui::init();
     let status = Tui::new(config, boards, args.runs).run(&mut terminal);

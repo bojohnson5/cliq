@@ -17,6 +17,7 @@ ratatui = "0.29.0"
 rand = "0.9.1"
 simplelog = "0.12.2"
 log = "0.4.27"
+time = "0.3.41"
 
 [build-dependencies]
 bindgen = "0.71.0"
