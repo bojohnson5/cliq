@@ -565,13 +565,14 @@ fn event_processing(
     let zs_level = config.run_settings.zs_level;
     let zs_threshold = config.run_settings.zs_threshold;
     let zs_edge = config.run_settings.zs_edge;
+    let zs_samples = config.run_settings.zs_samples;
 
     loop {
         match rx.recv() {
             Ok(mut board_event) => {
                 let r: f64 = rng.random();
                 if r > zs_level {
-                    zero_suppress(&mut board_event, zs_threshold, zs_edge);
+                    zero_suppress(&mut board_event, zs_threshold, zs_edge, zs_samples);
                 }
                 queues[board_event.board_id].push_back(board_event);
             }
@@ -716,7 +717,12 @@ fn data_taking_thread(
 /// suppress adc samples from digitizer based on user-defined threshold
 /// relative to baseline and whether or not the pulses are rising or
 /// falling
-fn zero_suppress(board_data: &mut BoardEvent, threshold: f64, edge: ZeroSuppressionEdge) {
+fn zero_suppress(
+    board_data: &mut BoardEvent,
+    threshold: f64,
+    edge: ZeroSuppressionEdge,
+    bl_samples: isize,
+) {
     board_data
         .event
         .waveform_data
@@ -724,7 +730,11 @@ fn zero_suppress(board_data: &mut BoardEvent, threshold: f64, edge: ZeroSuppress
         .into_par_iter()
         .for_each(|mut channel| match edge {
             ZeroSuppressionEdge::Rise => {
-                let baseline = channel.slice(s![0..125]).mean().unwrap_or(u16::MIN) as f64;
+                let mut sum = 0.0;
+                for val in channel.slice(s![0..bl_samples]) {
+                    sum += *val as f64;
+                }
+                let baseline = sum / bl_samples as f64;
                 channel.map_inplace(|adc| {
                     let x = *adc as f64;
                     if x - baseline < threshold {
@@ -733,7 +743,11 @@ fn zero_suppress(board_data: &mut BoardEvent, threshold: f64, edge: ZeroSuppress
                 })
             }
             ZeroSuppressionEdge::Fall => {
-                let baseline = channel.slice(s![0..125]).mean().unwrap_or(u16::MAX) as f64;
+                let mut sum = 0.0;
+                for val in channel.slice(s![0..bl_samples]) {
+                    sum += *val as f64;
+                }
+                let baseline = sum / bl_samples as f64;
                 channel.map_inplace(|adc| {
                     let x = *adc as f64;
                     if x - baseline > threshold {

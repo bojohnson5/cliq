@@ -20,6 +20,10 @@ zs_threshold = 20 # 0..65535..1
 # which direction do pulses go
 zs_edge = "Rise" # or "Fall"
 
+# the number of samples to take in computing the
+# baseline for zero suppression
+zs_samples = 125
+
 # default values that don't need to be included
 # blosc_threads = 5
 # compression_level = 2

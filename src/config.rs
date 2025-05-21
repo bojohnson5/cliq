@@ -25,6 +25,7 @@ pub struct RunSettings {
     pub zs_level: f64,
     pub zs_threshold: f64,
     pub zs_edge: ZeroSuppressionEdge,
+    pub zs_samples: isize,
 }
 
 #[derive(Config, Debug, Clone)]
