@@ -65,18 +65,17 @@ pub struct PerBoardSettings {
 
 #[derive(Config, Debug, Clone)]
 pub struct SyncSettings {
-    pub primary_clock_src: String,
-    pub primary_sync_out: String,
-    pub primary_start_source: String,
-    pub primary_clock_out_fp: String,
-    pub secondary_clock_src: String,
-    pub secondary_sync_out: String,
-    pub secondary_start_source: String,
-    pub secondary_clock_out_fp: String,
-    pub auto_disarm: String,
+    pub boards: Vec<PerBoardSync>,
+}
+
+#[derive(Deserialize, Config, Debug, Clone)]
+pub struct PerBoardSync {
+    pub clock_src: String,
+    pub sync_out: String,
+    pub start_source: String,
+    pub clock_out_fp: String,
     pub trig_out: String,
-    pub run_delay: usize,
-    pub clk_out_delay: isize,
+    pub auto_disarm: String,
 }
 
 #[derive(Deserialize, Clone, Debug)]

@@ -99,12 +99,7 @@ impl Tui {
                 crate::configure_board(i, dev_handle, &self.config)?;
             }
             for &(i, dev_handle) in &self.boards {
-                crate::configure_sync(
-                    dev_handle,
-                    i as isize,
-                    self.boards.len() as isize,
-                    &self.config,
-                )?;
+                crate::configure_sync(dev_handle, i, self.boards.len(), &self.config)?;
             }
             info!("Reset and configured digitizer(s)");
 

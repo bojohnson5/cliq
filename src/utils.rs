@@ -241,80 +241,42 @@ pub fn configure_board(board_id: usize, handle: u64, config: &Conf) -> Result<()
     Ok(())
 }
 
-pub fn configure_one(handle: u64, config: &Conf) -> Result<(), FELibReturn> {
-    crate::felib_setvalue(
-        handle,
-        "/par/ClockSource",
-        &config.sync_settings.primary_clock_src,
-    )?;
-    crate::felib_setvalue(
-        handle,
-        "/par/StartSource",
-        &config.sync_settings.primary_start_source,
-    )?;
-    crate::felib_setvalue(
-        handle,
-        "/par/EnAutoDisarmAcq",
-        &config.sync_settings.auto_disarm,
-    )?;
-
-    Ok(())
-}
-
 pub fn configure_sync(
     handle: u64,
-    board_id: isize,
-    num_boards: isize,
+    board_id: usize,
+    num_boards: usize,
     config: &Conf,
 ) -> Result<(), FELibReturn> {
-    let first_board = board_id == 0;
-
-    if num_boards == 1 {
-        return configure_one(handle, config);
-    }
-
     crate::felib_setvalue(
         handle,
         "/par/ClockSource",
-        if first_board {
-            &config.sync_settings.primary_clock_src
-        } else {
-            &config.sync_settings.secondary_clock_src
-        },
+        &config.sync_settings.boards[board_id].clock_src,
     )?;
     crate::felib_setvalue(
         handle,
         "/par/SyncOutMode",
-        if first_board {
-            &config.sync_settings.primary_sync_out
-        } else {
-            &config.sync_settings.secondary_sync_out
-        },
+        &config.sync_settings.boards[board_id].sync_out,
     )?;
     crate::felib_setvalue(
         handle,
         "/par/StartSource",
-        if first_board {
-            &config.sync_settings.primary_start_source
-        } else {
-            &config.sync_settings.secondary_start_source
-        },
+        &config.sync_settings.boards[board_id].start_source,
     )?;
     crate::felib_setvalue(
         handle,
         "/par/EnClockOutFP",
-        if first_board {
-            &config.sync_settings.primary_clock_out_fp
-        } else {
-            &config.sync_settings.secondary_clock_out_fp
-        },
+        &config.sync_settings.boards[board_id].clock_out_fp,
     )?;
     crate::felib_setvalue(
         handle,
         "/par/EnAutoDisarmAcq",
-        &config.sync_settings.auto_disarm,
+        &config.sync_settings.boards[board_id].auto_disarm,
     )?;
-    crate::felib_setvalue(handle, "/par/TrgOutMode", &config.sync_settings.trig_out)?;
+    crate::felib_setvalue(
+        handle,
+        "/par/TrgOutMode",
+        &config.sync_settings.boards[board_id].trig_out,
+    )?;
 
     let run_delay = get_run_delay(board_id, num_boards);
     let clock_out_delay = get_clock_out_delay(board_id, num_boards);
@@ -328,7 +290,7 @@ pub fn configure_sync(
     Ok(())
 }
 
-fn get_clock_out_delay(board_id: isize, num_boards: isize) -> isize {
+fn get_clock_out_delay(board_id: usize, num_boards: usize) -> isize {
     let first_board = board_id == 0;
     let last_board = board_id == num_boards - 1;
 
@@ -341,7 +303,7 @@ fn get_clock_out_delay(board_id: isize, num_boards: isize) -> isize {
     }
 }
 
-fn get_run_delay(board_id: isize, num_boards: isize) -> isize {
+fn get_run_delay(board_id: usize, num_boards: usize) -> usize {
     let first_board = board_id == 0;
     let board_id_from_last = num_boards - board_id - 1;
 

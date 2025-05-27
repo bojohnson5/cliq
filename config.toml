@@ -132,24 +132,25 @@ itl_gatewidth = 1000
 itl_retrig = "True"
 itl_connect = "ITLA"
 
-[sync_settings]
-primary_clock_src = "Internal" # or FPClkIn
+[[sync_settings.boards]]
+clock_src = "Internal" # or "FPClkIn"
 # options are "Disabled", "SyncIn", "TestPulse", "IntClk", "Run", "User"
-primary_sync_out = "Run"
+sync_out = "Run"
 # options are "EncodedClkIn", "SINlevel", "SINedge", "SWcmd", "LVDS"
 # "FirstTrigger", "P0" (backplane)
-primary_start_source = "SWcmd"
-primary_clock_out_fp = "True"           # or False
-secondary_clock_src = "FPClkIn"
-secondary_sync_out = "Disabled"
-secondary_start_source = "EncodedClkIn"
-secondary_clock_out_fp = "False"
-auto_disarm = "True"                    # or False
-
+start_source = "SWcmd"
+clock_out_fp = "True" # or "False"
 # options are "Disabled", "TrgIn", "P0", "SwTrg", "LVDS", "ITLA", "ITLB",
 # "ITLA_AND_ITLB", "ITLA_OR_ITLB", "EncodedClkIn", "Run", "RefClk",
 # "TestPulse", "Busy", "UserTrgout", "Fixed0", "Fixed1", "SyncIn", "SIN",
 # "GPIO", "LBinClk", "AcceptTrg", "TrgClk"
 trig_out = "TrgIn"
-run_delay = 0      # 0..524280..8
-clk_out_delay = 0  # -18888.88888888889..18888.88888888889..74.07407407407408 ps
+auto_disarm = "True" # or "False"
+
+[[sync_settings.boards]]
+clock_src = "FPClkIn"
+sync_out = "Disabled"
+start_source = "EncodedClkIn"
+clock_out_fp = "False"
+trig_out = "TrgIn"
+auto_disarm = "True"
