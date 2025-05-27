@@ -1,4 +1,4 @@
-# CLIQ - Coherent Liquid argon Iu daQ
+# CLIQ - [C]OHERENT [L]iquid Argon [I]U DAQ[Q]
 
 This application is meant to be used with CAEN VX2740 digitizers for the
 COH-Ar-750 experiment. It wraps the CAEN FELib header file with Rust code
