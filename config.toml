@@ -24,6 +24,10 @@ zs_edge = "Rise" # or "Fall"
 # baseline for zero suppression
 zs_samples = 125
 
+# the sliding window size to average and compare
+# to threshold for pulse finding
+zs_window_size = 5
+
 # default values that don't need to be included
 # blosc_threads = 5
 # compression_level = 2
@@ -139,7 +143,7 @@ sync_out = "Run"
 # options are "EncodedClkIn", "SINlevel", "SINedge", "SWcmd", "LVDS"
 # "FirstTrigger", "P0" (backplane)
 start_source = "SWcmd"
-clock_out_fp = "True" # or "False"
+clock_out_fp = "True"  # or "False"
 # options are "Disabled", "TrgIn", "P0", "SwTrg", "LVDS", "ITLA", "ITLB",
 # "ITLA_AND_ITLB", "ITLA_OR_ITLB", "EncodedClkIn", "Run", "RefClk",
 # "TestPulse", "Busy", "UserTrgout", "Fixed0", "Fixed1", "SyncIn", "SIN",
