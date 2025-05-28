@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::Parser;
+use cliq::*;
 use confique::Config;
-use rust_daq::*;
 use simplelog::{format_description, ConfigBuilder, WriteLogger};
 use std::fs::OpenOptions;
 
