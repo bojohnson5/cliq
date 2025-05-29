@@ -6,7 +6,7 @@ use crossbeam_channel::{tick, unbounded, Receiver, RecvError, Sender};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use log::info;
 use ndarray::{parallel::prelude::*, s};
-use ndarray::{ArrayBase, Axis, DataMut, Ix1};
+use ndarray::{ArrayViewMut1, Axis};
 use rand::Rng;
 use ratatui::{
     layout::{Constraint, Direction, Flex, Layout},
@@ -557,11 +557,11 @@ fn event_processing(
         queues.push(VecDeque::new());
     }
     let mut rng = rand::rng();
-    let zs_level = config.run_settings.zs_level;
-    let zs_threshold = config.run_settings.zs_threshold;
-    let zs_edge = config.run_settings.zs_edge;
-    let zs_samples = config.run_settings.zs_samples;
-    let zs_window_size = config.run_settings.zs_window_size;
+    let zs_level = config.zs_settings.zs_level;
+    let zs_threshold = config.zs_settings.zs_threshold;
+    let zs_edge = config.zs_settings.zs_edge;
+    let zs_samples = config.zs_settings.zs_samples;
+    let zs_window_size = config.zs_settings.zs_window_size;
 
     loop {
         match rx.recv() {
@@ -731,28 +731,26 @@ fn zero_suppress(
         .waveform_data
         .axis_iter_mut(Axis(0))
         .into_par_iter()
-        .for_each(|mut channel| {
+        .for_each(|channel| {
             let mut sum = 0.0;
             for val in channel.slice(s![0..bl_samples]) {
                 sum += *val as f64;
             }
             let baseline = sum / bl_samples as f64;
-            zs_algo(&mut channel, baseline, threshold, window_size, edge);
+            zs_algo(channel, baseline, threshold, window_size, edge);
         });
 }
 
 /// the actual zero suppression algorithm which uses a sliding window to find
 /// the beginning and end of the pulse and then zero suppresses anything
 /// that isn't a pulse
-fn zs_algo<S>(
-    channel: &mut ArrayBase<S, Ix1>,
+fn zs_algo(
+    mut channel: ArrayViewMut1<u16>,
     baseline: f64,
     threshold: f64,
     window_size: usize,
     edge: ZeroSuppressionEdge,
-) where
-    S: DataMut<Elem = u16>,
-{
+) {
     let mut win_sum: f64 = channel
         .slice(s![0..window_size])
         .iter()
@@ -797,19 +795,15 @@ fn zs_algo<S>(
             }
         }
     }
-    // if we still in a pulse at the end, close it at n
     if in_pulse {
         intervals.push((pulse_start, n));
     }
 
-    // If no pulses found, just zero everything
     if intervals.is_empty() {
         channel.fill(0);
         return;
     }
 
-    // 4) second pass: zero outside intervals
-    // We'll walk a cursor through, zeroing gaps.
     let data: &mut [u16] = channel.as_slice_mut().unwrap();
     let mut cursor = 0;
     for &(start, end) in &intervals {
@@ -820,7 +814,6 @@ fn zs_algo<S>(
         // leave [start..end) alone
         cursor = end;
     }
-    // zero the tail after last pulse
     for idx in cursor..n {
         data[idx] = 0;
     }

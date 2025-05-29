@@ -10,6 +10,8 @@ pub struct Conf {
     pub board_settings: BoardSettings,
     #[config(nested)]
     pub sync_settings: SyncSettings,
+    #[config(nested)]
+    pub zs_settings: ZsSettings,
 }
 
 #[derive(Config, Debug, Clone)]
@@ -22,6 +24,10 @@ pub struct RunSettings {
     pub blosc_threads: u8,
     #[config(default = 2)]
     pub compression_level: u8,
+}
+
+#[derive(Config, Debug, Clone)]
+pub struct ZsSettings {
     pub zs_level: f64,
     pub zs_threshold: f64,
     pub zs_edge: ZeroSuppressionEdge,

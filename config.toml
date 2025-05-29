@@ -1,14 +1,23 @@
 [run_settings]
 # list of board URLs
 boards = ["dig2://caendgtz-usb-25380", "dig2://caendgtz-usb-25379"]
+
 # run duration in seconds
 run_duration = 20
+
 # where to write data on disk
 output_dir = "/home/lardaq/Documents/testing"
+
 # this will create a directory in the one above with
 # the correct campaign number
 campaign_num = 0
 
+# default values that don't need to be included
+# blosc_threads = 5
+# compression_level = 2
+
+# zero suppression settings
+[zs_settings]
 # zero suppression level or what percentage of events
 # aren't zero suppressed at all
 zs_level = 0.01
@@ -28,12 +37,8 @@ zs_samples = 125
 # to threshold for pulse finding
 zs_window_size = 5
 
-# default values that don't need to be included
-# blosc_threads = 5
-# compression_level = 2
-
-# Settings common to all boards
-# The ranges given are start..stop..step
+# settings common to all boards
+# the ranges given are start..stop..step
 [board_settings.common]
 # record_len is the waveform length in samples
 record_len = 4125 # 4..10485760..4
@@ -41,7 +46,7 @@ record_len = 4125 # 4..10485760..4
 # pre_trig_len is pre-trigger length in samples
 pre_trig_len = 100 # 0..2042..1
 
-# The ranges given are start..stop..step
+# the ranges given are start..stop..step
 [[board_settings.boards]]
 # en_chans can be either true for all channels or a list
 # of channels to enable
@@ -136,6 +141,8 @@ itl_gatewidth = 1000
 itl_retrig = "True"
 itl_connect = "ITLA"
 
+# syncrhonization settings such as clock sources
+# and trigger sources
 [[sync_settings.boards]]
 clock_src = "Internal" # or "FPClkIn"
 # options are "Disabled", "SyncIn", "TestPulse", "IntClk", "Run", "User"
