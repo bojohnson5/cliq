@@ -1,5 +1,7 @@
 [run_settings]
 # list of board URLs
+# for connecting with IP address use
+# boards = ["dig2://192.168.1.1"]
 boards = ["dig2://caendgtz-usb-25380", "dig2://caendgtz-usb-25379"]
 
 # run duration in seconds
