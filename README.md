@@ -15,6 +15,10 @@ You will then want to make sure the appropriate CAEN libraries are installed:
 - CAEN FELib
 - CAEN Dig2
 
+You will also need to install the [hdf5](https://github.com/HDFGroup/hdf5) library somewhere
+on your system along with the [hdf5-blosc](https://github.com/Blosc/hdf5-blosc) filter
+which is used for compression.
+
 Modify the first `println!` statement in the `build.rs` file to point to the correct
 directory where those libraries are installed.
 
