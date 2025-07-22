@@ -478,7 +478,7 @@ impl Tui {
     }
 
     fn create_run_file(&mut self) -> Result<PathBuf> {
-        let mut camp_dir = self.create_camp_dir().unwrap();
+        let camp_dir = self.create_camp_dir().unwrap();
         let runs: Vec<DirEntry> = std::fs::read_dir(&camp_dir)
             .unwrap()
             .filter_map(|e| e.ok())
@@ -502,21 +502,24 @@ impl Tui {
             .max();
 
         if let Some(max) = max_run {
-            let file = format!("run{:0>6}_00.h5", max + 1);
-            camp_dir.push(&file);
+            let run_filename = format!("run{:0>6}_00.h5", max + 1);
+            let run_path = camp_dir.join(&run_filename);
             self.run_num = max + 1;
-            // copy config file to output directory
+
             let config_name = format!("config_run{:0>6}.toml", self.run_num);
-            let config_dest = camp_dir.join(config_name);
-            fs::copy(&self.config_file, config_dest)
+            let config_dest = camp_dir.join(&config_name);
+            fs::create_dir_all(&camp_dir)?;
+            fs::copy(&self.config_file, &config_dest)
                 .map_err(|e| anyhow::anyhow!("failed to copy config: {}", e))?;
-            Ok(camp_dir)
+
+            Ok(run_path)
         } else {
-            // copy config file to output directory
+            fs::create_dir_all(&camp_dir)?;
             let config_dest = camp_dir.join("config_run000000.toml");
-            fs::copy(&self.config_file, config_dest)
+            fs::copy(&self.config_file, &config_dest)
                 .map_err(|e| anyhow::anyhow!("failed to copy config: {}", e))?;
-            Ok(camp_dir.join("run000000_00.h5"))
+            let run_path = camp_dir.join("run000000_00.h5");
+            Ok(run_path)
         }
     }
 
