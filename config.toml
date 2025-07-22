@@ -14,6 +14,10 @@ output_dir = "/home/lardaq/Documents/testing"
 # the correct campaign number
 campaign_num = 0
 
+# number of total events a data file can have before
+# it creates a new file
+max_events_per_board = 7500
+
 # default values that don't need to be included
 # blosc_threads = 5
 # compression_level = 2

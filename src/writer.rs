@@ -14,6 +14,7 @@ pub struct HDF5Writer {
     subrun: usize,
     file_template: String,
     compression_level: u8,
+    pub saved_events: usize,
 }
 
 impl HDF5Writer {
@@ -29,6 +30,8 @@ impl HDF5Writer {
     ) -> Result<Self> {
         let file_template = filename.to_str().unwrap().replace("_0", "_{}");
         let file = File::create(filename)?;
+        // Create a scalar attribute "saved_events" and initialize to 0
+        file.new_attr::<usize>().shape(()).create("saved_events")?;
         blosc_set_nthreads(n_threads);
 
         // Create BoardData for each board.
@@ -52,6 +55,7 @@ impl HDF5Writer {
             subrun: 0,
             file_template,
             compression_level,
+            saved_events: 0,
         })
     }
 
@@ -113,6 +117,11 @@ impl HDF5Writer {
         for board in self.boards.iter_mut() {
             board.flush()?;
         }
+        // Update total saved_events after flushing
+        self.saved_events = self.boards.iter().map(|b| b.current_event).sum();
+        self.file
+            .attr("saved_events")?
+            .write_scalar(&self.saved_events)?;
         Ok(())
     }
 
@@ -134,7 +143,7 @@ impl HDF5Writer {
         // For example: run1_1.h5
         let new_filename = self
             .file_template
-            .replace("_{}", &format!("_{}", self.subrun));
+            .replace("_{}", &format!("_{:0>2}", self.subrun));
         let new_path = PathBuf::from(new_filename);
         // Create new file.
         let new_file = File::create(&new_path)?;
@@ -159,6 +168,11 @@ impl HDF5Writer {
                 self.boards[i].append_buffer(ts, wf, count)?;
             }
         }
+        // Reset and update saved_events after rollover
+        self.saved_events = self.boards.iter().map(|b| b.current_event).sum();
+        self.file
+            .attr("saved_events")?
+            .write_scalar(&self.saved_events)?;
 
         Ok(())
     }

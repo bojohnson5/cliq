@@ -16,6 +16,7 @@ use ratatui::{
     widgets::{Block, Clear, Paragraph},
     DefaultTerminal, Frame,
 };
+use std::fs;
 use std::{
     collections::VecDeque,
     fs::DirEntry,
@@ -74,6 +75,7 @@ pub struct Tui {
     pub max_runs: Option<usize>,
     pub show_popup: Option<String>,
     pub exit: Option<StatusExit>,
+    pub config_file: String,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -220,7 +222,12 @@ impl Tui {
         }
     }
 
-    pub fn new(config: Conf, boards: Vec<(usize, u64)>, max_runs: Option<usize>) -> Self {
+    pub fn new(
+        config: Conf,
+        boards: Vec<(usize, u64)>,
+        max_runs: Option<usize>,
+        config_file: String,
+    ) -> Self {
         let run_duration = Duration::from_secs(config.run_settings.run_duration);
         let camp_num = config.run_settings.campaign_num;
         Self {
@@ -238,6 +245,7 @@ impl Tui {
             run_duration,
             misaligned_events: 0,
             dropped_events: 0,
+            config_file,
         }
     }
 
@@ -494,12 +502,21 @@ impl Tui {
             .max();
 
         if let Some(max) = max_run {
-            let file = format!("run{}_0.h5", max + 1);
+            let file = format!("run{:0>6}_00.h5", max + 1);
             camp_dir.push(&file);
             self.run_num = max + 1;
+            // copy config file to output directory
+            let config_name = format!("config_run{:0>6}.toml", self.run_num);
+            let config_dest = camp_dir.join(config_name);
+            fs::copy(&self.config_file, config_dest)
+                .map_err(|e| anyhow::anyhow!("failed to copy config: {}", e))?;
             Ok(camp_dir)
         } else {
-            Ok(camp_dir.join("run0_0.h5"))
+            // copy config file to output directory
+            let config_dest = camp_dir.join("config_run000000.toml");
+            fs::copy(&self.config_file, config_dest)
+                .map_err(|e| anyhow::anyhow!("failed to copy config: {}", e))?;
+            Ok(camp_dir.join("run000000_00.h5"))
         }
     }
 
@@ -545,7 +562,7 @@ fn event_processing(
         64,
         config.board_settings.common.record_len,
         config.run_settings.boards.len(),
-        7500,
+        config.run_settings.max_events_per_board,
         50,
         config.run_settings.blosc_threads,
         config.run_settings.compression_level,

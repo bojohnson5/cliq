@@ -44,7 +44,8 @@ fn main() -> Result<()> {
     WriteLogger::init(simplelog::LevelFilter::Debug, log_config, log_file).unwrap();
 
     let mut terminal = ratatui::init();
-    let status = Tui::new(config, boards, args.runs).run(&mut terminal);
+    let config_file = args.config.clone();
+    let status = Tui::new(config, boards, args.runs, config_file).run(&mut terminal);
     ratatui::restore();
 
     println!("\nTTFN!");

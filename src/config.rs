@@ -20,6 +20,7 @@ pub struct RunSettings {
     pub run_duration: u64,
     pub output_dir: String,
     pub campaign_num: usize,
+    pub max_events_per_board: usize,
     #[config(default = 5)]
     pub blosc_threads: u8,
     #[config(default = 2)]
