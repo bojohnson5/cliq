@@ -147,6 +147,11 @@ impl HDF5Writer {
         let new_path = PathBuf::from(new_filename);
         // Create new file.
         let new_file = File::create(&new_path)?;
+        new_file
+            .new_attr::<usize>()
+            .shape(())
+            .create("saved_events")?;
+        new_file.attr("saved_events")?.write_scalar(&0)?;
         // Create new groups and board data.
         let new_boards = Self::create_boards(
             &new_file,
