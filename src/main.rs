@@ -17,7 +17,7 @@ struct Args {
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    let config = Conf::from_file(args.config)?;
+    let config = Conf::from_file(&args.config)?;
 
     // List of board connection strings. Add as many as needed.
     let board_urls = &config.run_settings.boards;
