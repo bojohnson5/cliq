@@ -28,7 +28,7 @@ impl HDF5Writer {
         n_threads: u8,
         compression_level: u8,
     ) -> Result<Self> {
-        let file_template = filename.to_str().unwrap().replace("_0", "_{}");
+        let file_template = filename.to_str().unwrap().replace("_00", "_{}");
         let file = File::create(filename)?;
         // Create a scalar attribute "saved_events" and initialize to 0
         file.new_attr::<usize>().shape(()).create("saved_events")?;
