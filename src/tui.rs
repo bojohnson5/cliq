@@ -401,6 +401,22 @@ impl Tui {
             }
             Err(_) => status_text.push(Line::from("Acquisition status: err in read".yellow())),
         };
+        match crate::felib_getvalue(handle, "/par/TempSensAirIn") {
+            Ok(s) => status_text.push(Line::from(
+                format!("Incoming air temp (°C): {}", s).yellow(),
+            )),
+            Err(_) => status_text.push(Line::from("Incoming air temp: err in read".yellow())),
+        };
+        match crate::felib_getvalue(handle, "/par/TempSensAirOut") {
+            Ok(s) => status_text.push(Line::from(
+                format!("Outgoing air temp (°C): {}", s).yellow(),
+            )),
+            Err(_) => status_text.push(Line::from("Outgoing air temp: err in read".yellow())),
+        };
+        match crate::felib_getvalue(handle, "/par/TempSensHottestADC") {
+            Ok(s) => status_text.push(Line::from(format!("Hottest ADC temp (°C): {}", s).yellow())),
+            Err(_) => status_text.push(Line::from("Hottest ADC temp: err in read".yellow())),
+        };
 
         Paragraph::new(status_text).centered().block(block)
     }
