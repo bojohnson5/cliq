@@ -1,5 +1,6 @@
 use crate::{
-    BoardEvent, Conf, Counter, EventWrapper, FELibReturn, HDF5Writer, ZeroSuppressionEdge,
+    digitizer_params, BoardEvent, Conf, Counter, EventWrapper, FELibReturn, HDF5Writer,
+    ZeroSuppressionEdge,
 };
 use anyhow::{anyhow, Result};
 use crossbeam_channel::{tick, unbounded, Receiver, RecvError, Sender};
@@ -110,6 +111,7 @@ impl Tui {
             let (tx_events, ev_handle, board_handles) =
                 self.begin_run(Arc::clone(&shutdown), tx_stats)?;
             info!("Beginning run {}", self.run_num);
+            digitizer_params::log_all(&self.boards);
 
             self.t_begin = Instant::now();
             self.exit = None;

@@ -1,4 +1,5 @@
 mod config;
+mod digitizer_params;
 mod event;
 mod felib;
 mod tui;
