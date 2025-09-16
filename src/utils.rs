@@ -5,11 +5,12 @@ use crate::{
 use std::{collections::VecDeque, time::Instant};
 
 /// Structure representing an event coming from a board.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct BoardEvent {
     pub board_id: usize,
     pub event: EventWrapper,
+    pub zero_suppressed: bool,
 }
 
 /// A helper structure to track statistics, with both

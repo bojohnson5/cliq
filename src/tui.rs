@@ -321,7 +321,7 @@ impl Tui {
         self.exit = Some(StatusExit::Quit);
     }
 
-    fn run_stats_paragraph(&self) -> Paragraph {
+    fn run_stats_paragraph(&'_ self) -> Paragraph<'_> {
         let title =
             Line::from(format!(" Campaign {} Run {} Status ", self.camp_num, self.run_num).bold());
         let instructrions = Line::from(vec![" Quit ".into(), "<Q> ".blue().bold()]);
@@ -359,7 +359,7 @@ impl Tui {
         Paragraph::new(status_text).centered().block(block)
     }
 
-    fn board_status_paragraph(&self, board: usize) -> Paragraph {
+    fn board_status_paragraph(&'_ self, board: usize) -> Paragraph<'_> {
         let title = Line::from(format!(" Board {} Status ", self.boards[board].0).bold());
         let block = Block::bordered()
             .title(title.centered())
@@ -613,8 +613,22 @@ fn event_processing(
                         zs_samples,
                         zs_window_size,
                     );
+                    board_event.zero_suppressed = true;
+                    queues[board_event.board_id].push_back(board_event);
+                } else {
+                    board_event.zero_suppressed = false;
+                    let mut suppressed_event = board_event.clone();
+                    zero_suppress(
+                        &mut suppressed_event,
+                        zs_threshold,
+                        zs_edge,
+                        zs_samples,
+                        zs_window_size,
+                    );
+                    suppressed_event.zero_suppressed = true;
+                    queues[board_event.board_id].push_back(board_event);
+                    queues[suppressed_event.board_id].push_back(suppressed_event);
                 }
-                queues[board_event.board_id].push_back(board_event);
             }
             Err(RecvError) => {
                 writer.flush_all().unwrap();
@@ -662,6 +676,7 @@ fn event_processing(
                             event.event.c_event.trigger_id,
                             event.event.c_event.flags,
                             event.event.c_event.board_fail,
+                            event.zero_suppressed,
                         )
                         .unwrap();
                 }
@@ -735,6 +750,7 @@ fn data_taking_thread(
                 let board_event = BoardEvent {
                     board_id,
                     event: std::mem::replace(&mut event, EventWrapper::new(num_ch, waveform_len)),
+                    zero_suppressed: false,
                 };
                 if tx.send(board_event).is_err() {
                     shutdown.store(true, Ordering::SeqCst);
