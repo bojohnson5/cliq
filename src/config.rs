@@ -29,11 +29,12 @@ pub struct RunSettings {
 
 #[derive(Config, Debug, Clone)]
 pub struct ZsSettings {
-    pub zs_level: f64,
+    pub zs_prescale: usize,
     pub zs_threshold: f64,
     pub zs_edge: ZeroSuppressionEdge,
     pub zs_samples: isize,
     pub zs_window_size: usize,
+    pub zs_stdev: f64,
 }
 
 #[derive(Config, Debug, Clone)]

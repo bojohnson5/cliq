@@ -8,7 +8,6 @@ use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use log::info;
 use ndarray::{parallel::prelude::*, s};
 use ndarray::{ArrayViewMut1, Axis};
-use rand::Rng;
 use ratatui::{
     layout::{Constraint, Direction, Flex, Layout},
     style::{Color, Style, Stylize},
@@ -594,24 +593,26 @@ fn event_processing(
     for _ in 0..num_boards {
         queues.push(VecDeque::new());
     }
-    let mut rng = rand::rng();
-    let zs_level = config.zs_settings.zs_level;
+    let zs_prescale = config.zs_settings.zs_prescale;
     let zs_threshold = config.zs_settings.zs_threshold;
     let zs_edge = config.zs_settings.zs_edge;
     let zs_samples = config.zs_settings.zs_samples;
     let zs_window_size = config.zs_settings.zs_window_size;
+    let zs_stdev = config.zs_settings.zs_stdev;
 
+    let mut count = 0;
     loop {
+        count += 1;
         match rx.recv() {
             Ok(mut board_event) => {
-                let r: f64 = rng.random();
-                if r > zs_level {
+                if count % zs_prescale != 0 {
                     zero_suppress(
                         &mut board_event,
                         zs_threshold,
                         zs_edge,
                         zs_samples,
                         zs_window_size,
+                        zs_stdev,
                     );
                     board_event.zero_suppressed = true;
                     queues[board_event.board_id].push_back(board_event);
@@ -624,6 +625,7 @@ fn event_processing(
                         zs_edge,
                         zs_samples,
                         zs_window_size,
+                        zs_stdev,
                     );
                     suppressed_event.zero_suppressed = true;
                     queues[board_event.board_id].push_back(board_event);
@@ -779,6 +781,7 @@ fn zero_suppress(
     edge: ZeroSuppressionEdge,
     bl_samples: isize,
     window_size: usize,
+    zs_stdev: f64,
 ) {
     board_data
         .event
@@ -791,29 +794,37 @@ fn zero_suppress(
                 sum += *val as f64;
             }
             let baseline = sum / bl_samples as f64;
-            zs_algo(channel, baseline, threshold, window_size, edge);
+            let variance = channel
+                .slice(s![0..bl_samples])
+                .map(|val| (*val as f64 - baseline).powi(2))
+                .sum();
+            let stdev = variance.sqrt();
+            if stdev > zs_stdev || !has_pulse(&channel, baseline, threshold, window_size, edge) {
+                all_zeros(channel);
+            }
         });
 }
 
 /// the actual zero suppression algorithm which uses a sliding window to find
 /// the beginning and end of the pulse and then zero suppresses anything
 /// that isn't a pulse
-fn zs_algo(
-    mut channel: ArrayViewMut1<u16>,
+fn has_pulse(
+    channel: &ArrayViewMut1<u16>,
     baseline: f64,
     threshold: f64,
     window_size: usize,
     edge: ZeroSuppressionEdge,
-) {
+) -> bool {
+    if channel.len() < window_size {
+        return false;
+    }
+
+    // initial window sum
     let mut win_sum: f64 = channel
         .slice(s![0..window_size])
         .iter()
         .map(|&x| x as f64)
         .sum();
-
-    let mut in_pulse = false;
-    let mut pulse_start = 0usize;
-    let mut intervals = Vec::new();
 
     let n = channel.len();
     for i in 0..=(n - window_size) {
@@ -826,49 +837,21 @@ fn zs_algo(
 
         match edge {
             ZeroSuppressionEdge::Rise => {
-                if !in_pulse && diff >= threshold {
-                    in_pulse = true;
-                    pulse_start = i;
-                } else if in_pulse && diff < threshold {
-                    // end just past the window
-                    let pulse_end = (i + window_size).min(n);
-                    intervals.push((pulse_start, pulse_end));
-                    in_pulse = false;
+                if diff >= threshold {
+                    return true;
                 }
             }
             ZeroSuppressionEdge::Fall => {
-                if !in_pulse && diff <= threshold {
-                    in_pulse = true;
-                    pulse_start = i;
-                } else if in_pulse && diff > threshold {
-                    // end just past the window
-                    let pulse_end = (i + window_size).min(n);
-                    intervals.push((pulse_start, pulse_end));
-                    in_pulse = false;
+                if diff <= threshold {
+                    return true;
                 }
             }
         }
     }
-    if in_pulse {
-        intervals.push((pulse_start, n));
-    }
 
-    if intervals.is_empty() {
-        channel.fill(0);
-        return;
-    }
+    false
+}
 
-    let data: &mut [u16] = channel.as_slice_mut().unwrap();
-    let mut cursor = 0;
-    for &(start, end) in &intervals {
-        // zero from cursor up to start
-        for idx in cursor..start {
-            data[idx] = 0;
-        }
-        // leave [start..end) alone
-        cursor = end;
-    }
-    for idx in cursor..n {
-        data[idx] = 0;
-    }
+fn all_zeros(mut channel: ArrayViewMut1<u16>) {
+    channel.map_inplace(|adc| *adc = 0);
 }

@@ -24,9 +24,9 @@ max_events_per_board = 7500
 
 # zero suppression settings
 [zs_settings]
-# zero suppression level or what percentage of events
-# aren't zero suppressed at all
-zs_level = 0.01
+# pre-scale factor to determine how many events to
+# apply zero-suppression to, factor = 1/zs_count
+zs_prescale = 1000
 
 # adc counts above/below baseline on which to enable
 # zero suppression
@@ -42,6 +42,11 @@ zs_samples = 125
 # the sliding window size to average and compare
 # to threshold for pulse finding
 zs_window_size = 5
+
+# the allowed standard deviation of the baseline
+# allowed for the event to be classified as "good"
+# values would be in ADC units
+zs_stdev = 20.5
 
 # settings common to all boards
 # the ranges given are start..stop..step
