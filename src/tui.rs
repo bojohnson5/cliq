@@ -614,10 +614,21 @@ fn event_processing(
                         zs_window_size,
                         zs_stdev,
                     );
-                    board_event.zero_suppressed = true;
+                    let mut mask = 0u64;
+                    for (ch_index, channel) in board_event
+                        .event
+                        .waveform_data
+                        .axis_iter(Axis(0))
+                        .enumerate()
+                    {
+                        if channel.iter().all(|&sample| sample == 0) {
+                            mask |= 1 << ch_index;
+                        }
+                    }
+                    board_event.zero_suppressed = mask;
                     queues[board_event.board_id].push_back(board_event);
                 } else {
-                    board_event.zero_suppressed = false;
+                    board_event.zero_suppressed = 0;
                     let mut suppressed_event = board_event.clone();
                     zero_suppress(
                         &mut suppressed_event,
@@ -627,7 +638,18 @@ fn event_processing(
                         zs_window_size,
                         zs_stdev,
                     );
-                    suppressed_event.zero_suppressed = true;
+                    let mut mask = 0u64;
+                    for (ch_index, channel) in board_event
+                        .event
+                        .waveform_data
+                        .axis_iter(Axis(0))
+                        .enumerate()
+                    {
+                        if channel.iter().all(|&sample| sample == 0) {
+                            mask |= 1 << ch_index;
+                        }
+                    }
+                    board_event.zero_suppressed = mask;
                     queues[board_event.board_id].push_back(board_event);
                     queues[suppressed_event.board_id].push_back(suppressed_event);
                 }
@@ -752,7 +774,7 @@ fn data_taking_thread(
                 let board_event = BoardEvent {
                     board_id,
                     event: std::mem::replace(&mut event, EventWrapper::new(num_ch, waveform_len)),
-                    zero_suppressed: false,
+                    zero_suppressed: 0,
                 };
                 if tx.send(board_event).is_err() {
                     shutdown.store(true, Ordering::SeqCst);

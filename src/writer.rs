@@ -96,16 +96,16 @@ impl HDF5Writer {
         trigger_id: u32,
         flag: u16,
         fail: bool,
-        zs_flag: bool,
+        zs_mask: u64,
     ) -> Result<()> {
         let result =
-            self.boards[board].append_event(timestamp, waveforms, trigger_id, flag, fail, zs_flag);
+            self.boards[board].append_event(timestamp, waveforms, trigger_id, flag, fail, zs_mask);
 
         if let Err(e) = result {
             if e.to_string().contains("Maximum number of events reached") {
                 self.rollover()?;
                 return self.boards[board]
-                    .append_event(timestamp, waveforms, trigger_id, flag, fail, zs_flag);
+                    .append_event(timestamp, waveforms, trigger_id, flag, fail, zs_mask);
             } else {
                 return Err(e);
             }
@@ -202,7 +202,7 @@ pub struct BoardData {
     pub trigid_buffer: Array2<u32>,
     pub flag_buffer: Array2<u16>,
     pub fail_buffer: Array2<bool>,
-    pub zs_buffer: Array2<bool>,
+    pub zs_buffer: Array2<u64>,
     pub n_channels: usize,
     pub n_samples: usize,
 }
@@ -261,7 +261,7 @@ impl BoardData {
 
         let zs_shape = (max_events, 1);
         let zero_suppressed = group
-            .new_dataset::<bool>()
+            .new_dataset::<u64>()
             .shape(zs_shape)
             .blosc_zstd(compression_level, true)
             .chunk((buffer_capacity, 1))
@@ -273,7 +273,7 @@ impl BoardData {
         let trigid_buffer = Array2::<u32>::zeros((buffer_capacity, 1));
         let flag_buffer = Array2::<u16>::zeros((buffer_capacity, 1));
         let fail_buffer = Array2::<bool>::default((buffer_capacity, 1));
-        let zs_buffer = Array2::<bool>::default((buffer_capacity, 1));
+        let zs_buffer = Array2::<u64>::zeros((buffer_capacity, 1));
 
         Ok(Self {
             current_event: 0,
@@ -305,7 +305,7 @@ impl BoardData {
         trigger_id: u32,
         flag: u16,
         fail: bool,
-        zs_flag: bool,
+        zs_mask: u64,
     ) -> Result<()> {
         // Verify that the incoming event has the expected shape.
         let (channels, samples) = waveforms.dim();
@@ -321,7 +321,7 @@ impl BoardData {
         self.trigid_buffer[[self.buffer_count, 0]] = trigger_id;
         self.flag_buffer[[self.buffer_count, 0]] = flag;
         self.fail_buffer[[self.buffer_count, 0]] = fail;
-        self.zs_buffer[[self.buffer_count, 0]] = zs_flag;
+        self.zs_buffer[[self.buffer_count, 0]] = zs_mask;
         // Copy the 2D waveform event into the corresponding slice of the buffer.
         self.wf_buffer
             .slice_mut(s![self.buffer_count, .., ..])
@@ -368,6 +368,27 @@ impl BoardData {
                 ..,
                 ..,
             ),
+        )?;
+
+        let zs_to_write = self
+            .zs_buffer
+            .slice(s![0..self.buffer_count, ..])
+            .to_owned();
+        self.zero_suppressed.write_slice(
+            &zs_to_write,
+            (
+                self.current_event..self.current_event + self.buffer_count,
+                ..,
+            ),
+        )?;
+
+        let fails_to_write = self
+            .fail_buffer
+            .slice(s![0..self.buffer_count, ..])
+            .to_owned();
+        self.fails.write_slice(
+            &fails_to_write,
+            self.current_event..self.current_event + self.buffer_count,
         )?;
 
         // Update the overall event count and reset the buffer.

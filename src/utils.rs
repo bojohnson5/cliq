@@ -10,7 +10,7 @@ use std::{collections::VecDeque, time::Instant};
 pub struct BoardEvent {
     pub board_id: usize,
     pub event: EventWrapper,
-    pub zero_suppressed: bool,
+    pub zero_suppressed: u64,
 }
 
 /// A helper structure to track statistics, with both
